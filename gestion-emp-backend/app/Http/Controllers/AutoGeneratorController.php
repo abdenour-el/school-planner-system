@@ -297,15 +297,14 @@ class AutoGeneratorController extends Controller
                     $ostadId = $suiviMatiere[$mId]['assigned_prof']->id;
 
                     $dureeRequise = 2;
-                    if ($jourTarget == $math1hDay && str_contains($nomMatiere, 'MATH')) {
-                        $dureeRequise = 1;
-                    }
+            
 
                     $placed = false;
                     $slotKeys = array_keys($slots);
                     shuffle($slotKeys);
 
                     foreach ($slotKeys as $k) {
+
                         $slot = $slots[$k];
                         if ($slot['jour'] != $jourTarget || $slot['filled']) continue;
 
@@ -314,7 +313,7 @@ class AutoGeneratorController extends Controller
 
                         $dureesATester = [];
                         if ($slot['duree'] == 2) {
-                            $dureesATester = (rand(0, 1) == 0) ? [2, 1] : [1, 2];
+                            $dureesATester = [2]; //only 2 hours allowed
                         } else {
                             $dureesATester = [1];
                         }
@@ -382,9 +381,13 @@ class AutoGeneratorController extends Controller
                         foreach($seancesToCreate as $sC) { if($sC['matiere_id'] == $mId && $sC['jour'] == $jour) { $dejaCeJour = true; break; } }
                         if($dejaCeJour) continue;
                         
-                        $is1hStrict = str_contains($nomMatiere, 'ISLAMIC') || str_contains($nomMatiere, 'ANG') || 
-                                      str_contains($nomMatiere, 'TAMAZIGHT') || str_contains($nomMatiere, 'ART') || 
-                                      str_contains($nomMatiere, 'INFO') || str_contains($nomMatiere, 'SPORT');
+                        $isIslamic = str_contains($nomMatiere, 'ISLAMIC'); 
+
+                        $is1hStrict = str_contains($nomMatiere, 'ANG') || 
+                                      str_contains($nomMatiere, 'TAMAZIGHT') ||
+                                      str_contains($nomMatiere, 'ART') || 
+                                      str_contains($nomMatiere, 'INFO') ||
+                                      str_contains($nomMatiere, 'SPORT');
                         
                         $slotKeys = array_keys($slots); 
                         
@@ -410,8 +413,27 @@ class AutoGeneratorController extends Controller
                             $maxPossible = min(2, $suiviMatiere[$mId]['reste'], $slot['duree'], (6 - $localHeures));
                             if ($maxPossible <= 0) continue;
 
-                            $dureeA_Prendre = $maxPossible;
-                            if ($is1hStrict) $dureeA_Prendre = 1; 
+                            $isHolyStrict = str_contains($nomMatiere, 'MATH') ||
+                                            str_contains($nomMatiere, 'ARAB') ||
+                                            str_contains($nomMatiere, 'FRAN');
+                            
+                            if ($isHolyStrict){
+                                if ($maxPossible < 2 ) continue; //refuse 1hour
+                                $dureeA_Prendre = 2;
+                            }elseif ($isIslamic) {
+                                if ($suiviMatiere[$mId]['reste'] === 3) {
+                                    $dureeA_Prendre = 2;
+                                } elseif ($suiviMatiere[$mId]['reste'] == 1) {
+                                    $dureeA_Prendre = 1;
+                                } else  {
+                                    $dureeA_Prendre = 2; // fallback (for safety)
+                                }
+
+                            }elseif ($is1hStrict) {
+                                $dureeA_Prendre = 1;
+                            }else {
+                                $dureeA_Prendre = $maxPossible;
+                            }
 
                             $heureFin = date('H:i', strtotime($slot['debut'] . " +{$dureeA_Prendre} hour"));
                             if ($checkConflict($ostadId, $jour, $slot['debut'], $heureFin)) continue;
@@ -429,9 +451,9 @@ class AutoGeneratorController extends Controller
                             $suiviMatiere[$mId]['reste'] -= $dureeA_Prendre;
                             $progress = true;
                             break; 
-                        }
                     }
                 }
+            }
                 if (!$progress) break;
                 $attempts++;
             }
