@@ -11,7 +11,9 @@ Route::apiResource('classes', ClasseController::class);
 Route::apiResource('matieres', MatiereController::class);
 Route::apiResource('enseignants', EnseignantController::class);
 Route::post('/generate-emploi', [AutoGeneratorController::class, 'generate']);
-Route::post('/generate-emploi-all', [\App\Http\Controllers\AutoGeneratorController::class, 'generateAll']);
+// Route::post('/generate-emploi-all', [\App\Http\Controllers\AutoGeneratorController::class, 'generateAll']);
+Route::post('/generate-all', [AutoGeneratorController::class, 'generateAll']);
+
 Route::apiResource('seances', SeanceController::class);
 // Routes for managing seances (GET, POST, PUT, DELETE)
 Route::get('/seances', [SeanceController::class, 'index']);

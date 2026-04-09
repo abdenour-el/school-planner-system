@@ -32,6 +32,10 @@ export default function Emploi() {
   const [isPreparingPDF, setIsPreparingPDF] = useState(false);
   const allComponentRef = useRef(null);
 
+
+  const [loadingBulk, setLoadingBulk] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState('');
+
   const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
   const componentRef = useRef(null);
   const selectedClasse = classes.find(c => c.id === parseInt(selectedClasseId));
@@ -136,6 +140,32 @@ export default function Emploi() {
     } finally {
       setLoadingAuto(false);
       setGenerationProgress('');
+    }
+  };
+
+  const handleAutoGenerateByLevel = async () => {
+    if (!selectedNiveau) {
+      alert("Choisissez un niveau.");
+      return;
+    }
+
+    setLoadingBulk(true);
+    setBulkProgress("⏳ Génération en cours...");
+
+    try {
+      const res = await axios.post('http://127.0.0.1:8000/api/generate-all', {
+        niveau: selectedNiveau
+      });
+
+      alert(res.data.message + "\n\n" + res.data.details.join("\n"));
+
+      fetchEmploi();
+
+    } catch (err) {
+      alert(err.response?.data?.message || "Erreur.");
+    } finally {
+      setLoadingBulk(false);
+      setBulkProgress('');
     }
   };
 
@@ -321,9 +351,21 @@ export default function Emploi() {
             </div>
           </div>
 
+          {loadingBulk && (
+            <div className="text-purple-600 font-black text-xs uppercase animate-pulse">
+              {bulkProgress}
+            </div>
+          )}
           <div className="flex flex-col items-end gap-3">
             {loadingAuto && <div className="text-indigo-600 font-black text-xs uppercase animate-pulse mb-1">⏳ {generationProgress}</div>}
             
+            <button
+              onClick={handleAutoGenerateByLevel}
+              disabled={loadingBulk || !selectedNiveau}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50"
+            >
+              ⚡ Générer Niveau
+            </button>
             <div className="flex flex-wrap gap-2 justify-end">
               
               {/* DOWNLOAD ALL CLASSES BUTTON */}

@@ -349,6 +349,7 @@ class AutoGeneratorController extends Controller
             if (!$bookHolyTrinity('Lundi') || (!$bookHolyTrinity('Vendredi'))) continue; 
 
             // REMAINING SUBJECTS BOOKING
+            $mathOneHourUsed = false;
             $attempts = 0;
             while ($attempts < 150) {
                 $keys = array_keys($suiviMatiere);
@@ -392,7 +393,8 @@ class AutoGeneratorController extends Controller
                         $slotKeys = array_keys($slots); 
                         
                         usort($slotKeys, function($k1, $k2) use ($slots, $is1hStrict, $ostadId, $jour, $hasAdjacentClass, $isRelaxedMode) {
-                            $slotA = $slots[$k1]; $slotB = $slots[$k2];
+                            $slotA = $slots[$k1];
+                            $slotB = $slots[$k2];
                             if ($is1hStrict && $slotA['duree'] != $slotB['duree']) return $slotA['duree'] <=> $slotB['duree']; 
                             if (!$is1hStrict && $slotA['duree'] != $slotB['duree']) return $slotB['duree'] <=> $slotA['duree']; 
                             if (!$isRelaxedMode) {
@@ -412,21 +414,43 @@ class AutoGeneratorController extends Controller
 
                             $maxPossible = min(2, $suiviMatiere[$mId]['reste'], $slot['duree'], (6 - $localHeures));
                             if ($maxPossible <= 0) continue;
+                            
+                            $isMath = str_contains($nomMatiere, 'MATH');
 
-                            $isHolyStrict = str_contains($nomMatiere, 'MATH') ||
+                            $isHolyStrict = 
                                             str_contains($nomMatiere, 'ARAB') ||
                                             str_contains($nomMatiere, 'FRAN');
-                            
-                            if ($isHolyStrict){
-                                if ($maxPossible < 2 ) continue; //refuse 1hour
-                                $dureeA_Prendre = 2;
-                            }elseif ($isIslamic) {
-                                if ($suiviMatiere[$mId]['reste'] === 3) {
-                                    $dureeA_Prendre = 2;
-                                } elseif ($suiviMatiere[$mId]['reste'] == 1) {
+                                            
+                            if ($isMath){
+                                if ($suiviMatiere[$mId]['reste'] == 1 && !$mathOneHourUsed){
                                     $dureeA_Prendre = 1;
-                                } else  {
-                                    $dureeA_Prendre = 2; // fallback (for safety)
+                                    $mathOneHourUsed = true;
+                                } else {
+                                    if ($maxPossible < 2 ) continue;
+                                    $dureeA_Prendre = 2;
+                                }
+                            }
+                            elseif ($isHolyStrict){
+                                if(!$isPanicMode) {
+                                    if ($maxPossible < 2) continue;
+                                    $dureeA_Prendre = 2;
+                                } else {
+                                    $dureeA_Prendre = ($maxPossible >= 2 ) ? 2 :1;
+                                }   
+                            } elseif ($isIslamic) {
+                                $reste = $suiviMatiere[$mId]['reste'];
+
+                                if ($reste == 3) {
+                                    // First time placing Islamic: MUST be 2 hours
+                                    if ($slot['duree'] < 2) continue; // Skip 1h slots for the first session
+                                    $dureeA_Prendre = 2;
+                                } elseif ($reste == 1) {
+                                    // Second time placing Islamic: MUST be 1 hour
+                                    $dureeA_Prendre = 1;
+                                } else {
+                                    // This case handles the 2h remainder (if for some reason the 1h was placed first)
+                                    if ($slot['duree'] < 2) continue;
+                                    $dureeA_Prendre = 2;
                                 }
 
                             }elseif ($is1hStrict) {
@@ -436,6 +460,10 @@ class AutoGeneratorController extends Controller
                             }
 
                             $heureFin = date('H:i', strtotime($slot['debut'] . " +{$dureeA_Prendre} hour"));
+                            // SAFETY GUARD: Prevent overlapping the 13:00 and 19:00 limits
+                            if ($slot['debut'] < '13:00' && $heureFin > '13:00') continue;
+                            if ($slot['debut'] >= '16:00' && $heureFin > '19:00') continue;
+
                             if ($checkConflict($ostadId, $jour, $slot['debut'], $heureFin)) continue;
 
                             if ($dureeA_Prendre < $slot['duree']) {
@@ -499,5 +527,57 @@ class AutoGeneratorController extends Controller
         }
         
         return ['success' => false, 'message' => implode("\n", $erreurs), 'blocking_prof_id' => $blockingProfId];
+    }
+
+
+    public function generateAll(Request $request)
+    {
+        set_time_limit(1200);
+        ini_set('memory_limit', '1024M');
+
+        $request->validate([
+            'niveau' => 'required|integer'
+        ]);
+
+        $classes = Classe::where('niveau', $request->niveau)
+            ->inRandomOrder()
+            ->get();
+
+        if ($classes->isEmpty()) {
+            return response()->json([
+                'message' => "Aucune classe pour ce niveau."
+            ], 404);
+        }
+
+        $logs = [];
+
+        try {
+            foreach ($classes as $classe) {
+
+                DB::beginTransaction();
+
+                $classesSacrifiees = [];
+
+                $result = $this->resolveWithBulldozer($classe, 0, $classesSacrifiees);
+
+                if ($result['success']) {
+                    DB::commit();
+                    $logs[] = "✔ {$classe->nom_classe}";
+                } else {
+                    DB::rollBack();
+                    $logs[] = "❌ {$classe->nom_classe} → " . $result['message'];
+                }
+            }
+
+            return response()->json([
+                'message' => "Génération terminée.",
+                'details' => $logs
+            ]);
+
+        } catch (Throwable $e) {
+            return response()->json([
+                'message' => "Erreur système : " . $e->getMessage()
+            ], 500);
+        }
     }
 }
