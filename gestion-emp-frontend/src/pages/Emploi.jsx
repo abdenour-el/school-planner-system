@@ -15,6 +15,11 @@ export default function Emploi() {
   // --- Schedule states ---
   const [seances, setSeances] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // --- NEW: Niveau display + print ---
+  const [allSeancesNiveau, setAllSeancesNiveau] = useState([]);
+  const [showNiveauTables, setShowNiveauTables] = useState(false);
+  const niveauComponentRef = useRef(null);
   
   // --- Auto-generation states ---
   const [loadingAuto, setLoadingAuto] = useState(false);
@@ -38,7 +43,7 @@ export default function Emploi() {
 
   const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
   const componentRef = useRef(null);
-  const selectedClasse = classes.find(c => c.id === parseInt(selectedClasseId));
+  const selectedClasse = classes.find(c => c.id === Number(selectedClasseId));
   
   // =========================================================================
   // PRINT/DOWNLOAD FUNCTIONS
@@ -74,6 +79,45 @@ export default function Emploi() {
     }
   };
 
+const handlePrintNiveau = useReactToPrint({
+  contentRef: niveauComponentRef,
+  documentTitle: selectedNiveau 
+    ? `Emplois_Niveau_${selectedNiveau}` 
+    : 'Emplois_Niveau',
+});
+
+const telechargerNiveau = async () => {
+  if (!selectedNiveau) {
+    alert("Choisissez un niveau.");
+    return;
+  }
+
+  if (!window.confirm(`Télécharger les emplois du niveau ${selectedNiveau} ?`)) return;
+
+  setIsPreparingPDF(true);
+
+  try {
+    const res = await axios.get('http://127.0.0.1:8000/api/seances');
+    
+    // filter only selected level classes
+    const classesNiveau = classes.filter(c => c.niveau === parseInt(selectedNiveau));
+    const ids = classesNiveau.map(c => c.id);
+
+    const filtered = res.data.filter(s => ids.includes(s.classe_id));
+
+    setAllSeancesNiveau(filtered);
+    setShowNiveauTables(true);
+
+    setTimeout(() => {
+      handlePrintNiveau();
+    }, 1200);
+
+  } catch {
+    alert("Erreur téléchargement niveau");
+  } finally {
+    setIsPreparingPDF(false);
+  }
+};
   // =========================================================================
   // DATA FETCHING (CRUD)
   // =========================================================================
@@ -120,6 +164,34 @@ export default function Emploi() {
   useEffect(() => {
     setSelectedClasseId('');
   }, [selectedNiveau]);
+  // isplay all planners of the selected niveau
+  useEffect(() => {
+    const fetchNiveauSeances = async () => {
+      if (selectedNiveau && !selectedClasseId) {
+        try {
+          const res = await axios.get('http://127.0.0.1:8000/api/seances');
+
+          const classesNiveau = classes.filter(
+            c => c.niveau === parseInt(selectedNiveau)
+          );
+          const ids = classesNiveau.map(c => c.id);
+
+          const filtered = res.data.filter(s => ids.includes(s.classe_id));
+
+          setAllSeancesNiveau(filtered);
+          setShowNiveauTables(true);
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        // Hide when no niveau or when class is selected
+        setShowNiveauTables(false);
+      }
+    };
+
+    fetchNiveauSeances();
+  }, [selectedNiveau, selectedClasseId, classes]);
+
 
   // =========================================================================
   // GENERATION & MODALS
@@ -148,6 +220,16 @@ export default function Emploi() {
       alert("Choisissez un niveau.");
       return;
     }
+    // NEW: show all classes of that level
+    const resAll = await axios.get('http://127.0.0.1:8000/api/seances');
+
+    const classesNiveau = classes.filter(c => c.niveau === parseInt(selectedNiveau));
+    const ids = classesNiveau.map(c => c.id);
+
+    const filtered = resAll.data.filter(s => ids.includes(s.classe_id));
+
+    setAllSeancesNiveau(filtered);
+    setShowNiveauTables(true);
 
     setLoadingBulk(true);
     setBulkProgress("⏳ Génération en cours...");
@@ -235,8 +317,9 @@ export default function Emploi() {
   // =========================================================================
   const renderTable = (classeData, seancesData) => (
     // Removed "min-h-[21cm]" to prevent 64-page overflow bug in printing
-    <div className="print-container bg-white p-8 rounded-xl shadow-sm print:p-0 print:shadow-none mx-auto w-full max-w-[29.7cm]">
-      
+    // <div className="print-container bg-white p-8 rounded-xl shadow-sm print:p-0 print:shadow-none mx-auto w-full max-w-[29.7cm]">
+    <div className="print-container bg-white p-4 rounded-xl shadow-sm print:p-0 print:shadow-none mx-auto w-full max-w-[29.7cm] scale-[0.85] origin-top"
+    >
       {/* HEADER OF THE DOCUMENT */}
       <div className="text-center mb-8 border-b-4 border-black pb-4">
         <h1 className="text-4xl font-black uppercase tracking-tighter text-gray-900 mb-4">EMPLOI DU TEMPS</h1>
@@ -372,6 +455,13 @@ export default function Emploi() {
               <button onClick={telechargerTous} disabled={isPreparingPDF || classes.length === 0} className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50">
                 {isPreparingPDF ? '⏳ PRÉPARATION...' : '📑 TÉLÉCHARGER TOUT (PDF)'}
               </button>
+              <button
+                onClick={telechargerNiveau}
+                disabled={!selectedNiveau || isPreparingPDF}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50"
+              >
+                📥 Télécharger Niveau
+              </button>
 
               {/* SINGLE CLASS ACTIONS */}
               {selectedClasseId && (
@@ -383,7 +473,7 @@ export default function Emploi() {
                     + Séance
                   </button>
                   <button onClick={handlePrintSingle} disabled={loadingAuto} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-green-200 uppercase text-[10px] transition-all disabled:opacity-50">
-                    📄 TÉLÉCHARGER CLASSE (1)
+                    📄 TÉLÉCHARGER CLASSE
                   </button>
                 </>
               )}
@@ -402,11 +492,34 @@ export default function Emploi() {
             <div ref={componentRef}>
               {renderTable(selectedClasse, seances)}
             </div>
+            
           )}
         </div>
       ) : (
+        !selectedNiveau && ( 
         <div className="flex flex-col items-center justify-center py-32 text-gray-300 no-print">
           <span className="text-6xl mb-4">🏫</span><h2 className="text-2xl font-black uppercase tracking-widest">Sélectionnez une classe</h2>
+        </div>
+        )
+      )}
+      {showNiveauTables && selectedNiveau && (
+        <div className="mt-10 bg-gray-100 p-6 rounded-2xl">
+          <h2 className="text-xl font-black mb-6 uppercase text-gray-800">
+            📚 Emplois du Niveau {selectedNiveau}
+          </h2>
+
+          <div className="space-y-10">
+            {classes
+              .filter(cls => cls.niveau === parseInt(selectedNiveau))
+              .map(cls => {
+                const seancesClasse = allSeancesNiveau.filter(s => s.classe_id === cls.id);
+                return (
+                  <div key={cls.id}>
+                    {renderTable(cls, seancesClasse)}
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
 
@@ -427,6 +540,23 @@ export default function Emploi() {
               </div>
             );
           })}
+        </div>
+      </div>
+      <div className="hidden">
+        <div ref={niveauComponentRef}>
+          {classes
+            .filter(cls => cls.niveau === parseInt(selectedNiveau))
+            .map((cls, index, arr) => {
+              const seancesClasse = allSeancesNiveau.filter(s => s.classe_id === cls.id);
+              return (
+                <div
+                  key={cls.id}
+                  style={{ pageBreakAfter: index === arr.length - 1 ? 'auto' : 'always' }}
+                >
+                  {renderTable(cls, seancesClasse)}
+                </div>
+              );
+            })}
         </div>
       </div>
 

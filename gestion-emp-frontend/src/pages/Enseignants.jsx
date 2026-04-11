@@ -9,6 +9,7 @@ export default function Enseignants() {
   const [enseignants, setEnseignants] = useState([]);
   const [matieres, setMatieres] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   
   // =========================================================================
   // VIEW & GROUPING STATES
@@ -323,10 +324,25 @@ export default function Enseignants() {
     let barColor = "bg-green-500";
     if (pourcentage >= 100) barColor = "bg-red-500 shadow-red-200";
     else if (pourcentage >= 80) barColor = "bg-orange-500";
+    const highlight = (text) => {
+      if (!search) return text;
 
+      const regex = new RegExp(`(${search})`, 'gi');
+      return text.replace(
+        regex,
+        '<mark class="bg-yellow-200 px-1 rounded">$1</mark>'
+      );
+    };
     return (
       <tr key={prof.id} className="hover:bg-blue-50/40 border-b border-gray-100 transition-colors bg-white">
-        <td className="py-4 px-4 font-black text-gray-900 w-[20%]">👨‍🏫 {prof.nom} {prof.prenom}</td>
+        <td className="py-4 px-4 font-black text-gray-900 w-[20%]">
+          👨‍🏫 {' '}
+          <span
+            dangerouslySetInnerHTML={{
+              __html: highlight(`${prof.nom} ${prof.prenom}`)
+            }}
+          />
+        </td>
         
         <td className="py-4 px-4 text-center w-[15%]">
           <div className="flex justify-center gap-1 flex-wrap">
@@ -378,7 +394,13 @@ export default function Enseignants() {
   // Group teachers by subject
   const enseignantsGroupes = matieres.map(mat => ({
     matiere: mat, 
-    profs: enseignants.filter(e => e.matiere_id === mat.id)
+    profs: enseignants.filter(e => {
+      const fullName = `${e.nom} ${e.prenom}`.toLowerCase();
+      return (
+        e.matiere_id === mat.id &&
+        fullName.includes(search.toLowerCase())
+      );
+    })
   })).filter(g => g.profs.length > 0); 
   
   if (loading) {
@@ -392,9 +414,14 @@ export default function Enseignants() {
       {/* 1. CONTROL PANEL */}
       {/* ===================================================================== */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900 tracking-tighter uppercase">👨‍🏫 CORPS ENSEIGNANT</h1>
-          <p className="text-xs font-bold text-gray-400 mt-1 uppercase tracking-widest">Gestion & Charge Horaire</p>
+        <div className='w-full md:w-[350px]'>
+        <input
+          type="text"
+          placeholder='rechercher un enseignant...'
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full border-2 border-gray-200 focus:border-blue-600 p-3 rounded-xl font-bold text-sm outline-none transition"
+        />
         </div>
         <div className="flex gap-4 items-center">
           {/* DOWNLOAD ALL TEACHERS BUTTON */}
@@ -414,12 +441,24 @@ export default function Enseignants() {
           <div key={groupe.matiere.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             
             {/* Group Header */}
-            <div onClick={() => toggleGroup(groupe.matiere.id)} className="bg-gray-900 hover:bg-gray-800 text-white p-4 cursor-pointer flex justify-between items-center transition-colors select-none">
+            <div
+             onClick={() => toggleGroup(groupe.matiere.id)} 
+             className="bg-gray-900 hover:bg-gray-800 text-white p-4  flex justify-between items-center transition-colors select-none"
+            >
               <div className="flex items-center gap-3">
                 <span className="text-xl">{expandedGroups[groupe.matiere.id] ? '📂' : '📁'}</span>
                 <h3 className="font-black uppercase tracking-widest text-sm">{groupe.matiere.nom_matiere}</h3>
               </div>
-              <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[10px] font-black">{groupe.profs.length} Prof(s)</span>
+              <div className='flex items-center gap-2'>
+                <button
+                  onClick={openAddModal}
+                  className="bg-green-600 hover:bg-green-800 text-white px-3 py-1 rounded-full text-[10px] font-black cursor-pointer transition">
+                  + Ajouter Prof
+                </button>
+                <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-[10px] font-black">
+                  {groupe.profs.length} Prof(s)
+                </span>
+              </div>
             </div>
             
             {/* Group Content (Teachers Table) */}
@@ -446,7 +485,11 @@ export default function Enseignants() {
         ))}
 
         {/* Empty State */}
-        {enseignants.length === 0 && (
+        {search && enseignantsGroupes.length === 0 ? (
+          <div className="text-center py-20 text-gray-400 font-black text-xl uppercase tracking-widest">
+            Aucun résultat trouvé
+          </div>
+        ) : enseignants.length === 0 && (
           <div className="text-center py-20 text-gray-300 font-black text-2xl uppercase tracking-tighter">
             Aucun enseignant
           </div>
