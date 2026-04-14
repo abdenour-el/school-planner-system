@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
 import { useReactToPrint } from 'react-to-print';
+import { FiEdit, FiTrash2, FiPrinter,FiX, FiDownload, FiLoader  } from "react-icons/fi";
+import { MdFolder, MdFolderOpen, MdOutlineCalendarMonth, MdPerson } from "react-icons/md";
+import axios from 'axios';
 
 export default function Enseignants() {
   // =========================================================================
@@ -336,12 +338,16 @@ export default function Enseignants() {
     return (
       <tr key={prof.id} className="hover:bg-blue-50/40 border-b border-gray-100 transition-colors bg-white">
         <td className="py-4 px-4 font-black text-gray-900 w-[20%]">
-          👨‍🏫 {' '}
-          <span
-            dangerouslySetInnerHTML={{
-              __html: highlight(`${prof.nom} ${prof.prenom}`)
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <span className="text-[#111FA2]">
+              <MdPerson size={20} />
+            </span>
+            <span className="text-[#111FA2]"
+              dangerouslySetInnerHTML={{
+                __html: highlight(`${prof.nom} ${prof.prenom}`)
+              }}
+            />
+          </div>
         </td>
         
         <td className="py-4 px-4 text-center w-[15%]">
@@ -378,13 +384,14 @@ export default function Enseignants() {
 
         <td className="py-4 px-4 text-right space-x-2 w-[25%]">
           <button onClick={() => handleViewEmploi(prof)} className="text-green-600 hover:text-white hover:bg-green-600 border-2 border-green-100 hover:border-green-600 px-3 py-1 rounded-lg font-black text-[10px] transition-all uppercase shadow-sm">
-            📅 Emploi
+            <MdOutlineCalendarMonth size={18} />
+            
           </button>
-          <button onClick={() => openEditModal(prof)} className="text-orange-500 hover:text-white hover:bg-orange-500 border-2 border-orange-100 hover:border-orange-500 px-3 py-1 rounded-lg font-black text-[10px] transition-all uppercase">
-            Éditer
+          <button onClick={() => openEditModal(prof)} className="text-blue-500 hover:text-white hover:bg-blue-500 border-2 border-blue-100 hover:border-blue-500 px-3 py-1 rounded-lg font-black text-[10px] transition-all uppercase">
+            <FiEdit size={18} />
           </button>
           <button onClick={() => handleDelete(prof.id)} className="text-red-500 hover:text-white hover:bg-red-500 border-2 border-red-100 hover:border-red-500 px-3 py-1 rounded-lg font-black text-[10px] transition-all uppercase">
-            Sup.
+            <FiTrash2 size={18} />
           </button>
         </td>
       </tr>
@@ -392,13 +399,15 @@ export default function Enseignants() {
   };
 
   // Group teachers by subject
+  const searchWords = search.toLowerCase().trim().split(/\s+/);
+
   const enseignantsGroupes = matieres.map(mat => ({
     matiere: mat, 
     profs: enseignants.filter(e => {
       const fullName = `${e.nom} ${e.prenom}`.toLowerCase();
       return (
         e.matiere_id === mat.id &&
-        fullName.includes(search.toLowerCase())
+        searchWords.every(word => fullName.includes(word))
       );
     })
   })).filter(g => g.profs.length > 0); 
@@ -426,7 +435,18 @@ export default function Enseignants() {
         <div className="flex gap-4 items-center">
           {/* DOWNLOAD ALL TEACHERS BUTTON */}
           <button onClick={telechargerTous} disabled={isPreparingPDF || enseignants.length === 0} className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50">
-            {isPreparingPDF ? '⏳ PRÉPARATION...' : '📑 TÉLÉCHARGER TOUT (PDF)'}
+            {isPreparingPDF ? (  
+              <div className="flex items-center gap-2">
+                <FiLoader size={18} className="animate-spin" />
+                PRÉPARATION...
+              </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <FiDownload size={18} />
+                  TÉLÉCHARGER TOUT (PDF)
+                </div>
+            )
+            }
           </button>
           
           <button onClick={openAddModal} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition-all uppercase text-xs">+ Ajouter Prof</button>
@@ -446,7 +466,7 @@ export default function Enseignants() {
              className="bg-gray-900 hover:bg-gray-800 text-white p-4  flex justify-between items-center transition-colors select-none"
             >
               <div className="flex items-center gap-3">
-                <span className="text-xl">{expandedGroups[groupe.matiere.id] ? '📂' : '📁'}</span>
+                <span className="text-xl ">{expandedGroups[groupe.matiere.id] ? <MdFolderOpen size={25} /> : <MdFolder size={25} />}</span>
                 <h3 className="font-black uppercase tracking-widest text-sm">{groupe.matiere.nom_matiere}</h3>
               </div>
               <div className='flex items-center gap-2'>
@@ -564,7 +584,7 @@ export default function Enseignants() {
               
               <div className="flex justify-end gap-3 pt-4">
                 <button type="button" onClick={() => { setIsModalOpen(false); setEditingId(null); }} className="px-6 py-3 bg-gray-100 text-gray-500 rounded-xl hover:bg-gray-200 font-black uppercase text-xs">Annuler</button>
-                <button type="submit" className={`px-8 py-3 text-white rounded-xl font-black uppercase text-xs shadow-xl transition-all ${editingId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                <button type="submit" className={`px-8 py-3 text-white rounded-xl font-black uppercase text-xs shadow-xl transition-all ${editingId ? 'bg-blue-500 hover:bg-blue-600' : 'bg-blue-600 hover:bg-blue-700'}`}>
                   {editingId ? "✓ Modifier" : "✓ Enregistrer"}
                 </button>
               </div>
@@ -589,10 +609,10 @@ export default function Enseignants() {
               </div>
               <div className="flex gap-3">
                 <button onClick={handlePrintSingle} className="bg-gray-900 hover:bg-black text-white px-6 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-gray-400 transition-all flex items-center gap-2">
-                  <span className="text-lg">🖨️</span> Imprimer (1)
+                  <span className="text-lg"><FiPrinter /></span> Imprimer
                 </button>
                 <button onClick={() => setShowEmploiModal(false)} className="text-gray-500 hover:text-red-500 hover:bg-red-50 w-10 h-10 rounded-full font-black text-xl flex items-center justify-center transition-colors">
-                  ✕
+                  <FiX />
                 </button>
               </div>
             </div>

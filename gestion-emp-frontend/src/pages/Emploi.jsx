@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useReactToPrint } from 'react-to-print';
+import { useLocation } from 'react-router-dom';
+import { FiCalendar, FiDownload, FiFileText, FiTrash2, FiLoader } from 'react-icons/fi';
+import { MdAutoAwesome, MdAdd, MdOutlineCalendarMonth } from 'react-icons/md';
+import { FaSchool, FaBook } from 'react-icons/fa';
 
 export default function Emploi() {
   // --- Data states ---
@@ -49,6 +53,7 @@ export default function Emploi() {
   // PRINT/DOWNLOAD FUNCTIONS
   // =========================================================================
   
+  const location = useLocation();
   // Print SINGLE class
   const handlePrintSingle = useReactToPrint({
     contentRef: componentRef,
@@ -162,7 +167,9 @@ const telechargerNiveau = async () => {
 
   // Reset class selection if level changes
   useEffect(() => {
+    if (!location.state?.classeId){ 
     setSelectedClasseId('');
+    }
   }, [selectedNiveau]);
   // isplay all planners of the selected niveau
   useEffect(() => {
@@ -191,6 +198,14 @@ const telechargerNiveau = async () => {
 
     fetchNiveauSeances();
   }, [selectedNiveau, selectedClasseId, classes]);
+
+  useEffect(() => {
+    if (location.state?.classeId) {
+      setSelectedClasseId(location.state.classeId);
+      setSelectedNiveau(location.state.niveau);
+      setShowNiveauTables(false);
+    }
+  }, [location.state]);
 
 
   // =========================================================================
@@ -412,27 +427,56 @@ const telechargerNiveau = async () => {
       
       {/* 1. CONTROL PANEL */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 no-print">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
-          
+        {/* <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6"> */}
+        <div className="flex flex-col gap-4">
+
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-black text-gray-900 tracking-tighter uppercase">📅 EMPLOIS DES CLASSES</h1>
-            <div className="flex flex-wrap items-center gap-4 bg-gray-50 p-3 rounded-xl border border-gray-100">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Niveau:</span>
-                <select className="border-2 border-indigo-200 bg-white text-indigo-900 font-black px-4 py-2 rounded-lg text-xs outline-none focus:border-indigo-600 shadow-sm" value={selectedNiveau} onChange={e => setSelectedNiveau(e.target.value)}>
-                  <option value="">-- TOUS --</option>
-                  {niveauxDisponibles.map(niv => <option key={niv} value={niv}>Niveau {niv}</option>)}
-                </select>
+            <h1 className="text-2xl font-black text-gray-900 tracking-tighter uppercase flex items-center gap-2 ">
+            <div className='flex items-center gap-2'>
+              <MdOutlineCalendarMonth />
+              EMPLOIS DES CLASSES
+            </div>
+            </h1>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Niveau */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Niveau:</span>
+                  <select className="border-2 border-indigo-200 bg-white text-indigo-900 font-black px-4 py-2 rounded-lg text-xs outline-none focus:border-indigo-600 shadow-sm" value={selectedNiveau} onChange={e => setSelectedNiveau(e.target.value)}>
+                    <option value="">-- TOUS --</option>
+                    {niveauxDisponibles.map(niv => <option key={niv} value={niv}>Niveau {niv}</option>)}
+                  </select>
+                </div>
+                {/* Classe */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Classe:</span>
+                  <select className="border-2 border-indigo-200 bg-white text-indigo-900 font-black px-4 py-2 rounded-lg text-xs outline-none focus:border-indigo-600 shadow-sm disabled:opacity-50" value={selectedClasseId} onChange={e => setSelectedClasseId(e.target.value)}>
+                    <option value="">-- CHOISIR --</option>
+                    {classesFiltrees.map(cls => <option key={cls.id} value={cls.id}>{cls.nom_classe}</option>)}
+                  </select>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Classe:</span>
-                <select className="border-2 border-indigo-200 bg-white text-indigo-900 font-black px-4 py-2 rounded-lg text-xs outline-none focus:border-indigo-600 shadow-sm disabled:opacity-50" value={selectedClasseId} onChange={e => setSelectedClasseId(e.target.value)}>
-                  <option value="">-- CHOISIR --</option>
-                  {classesFiltrees.map(cls => <option key={cls.id} value={cls.id}>{cls.nom_classe}</option>)}
-                </select>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleAutoGenerateByLevel}
+                  disabled={loadingBulk || !selectedNiveau}
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-black text-[10px] uppercase transition-all disabled:opacity-50 flex items-center gap-1"
+                >
+                  <div className='flex items-center gap-2'>
+                    <MdAutoAwesome size={16} className="inline mr-1" />
+                    Générer Niveau
+                  </div>
+                </button>
+                {selectedClasseId && (
+                  <button onClick={handleAutoGenerateSingle} disabled={loadingAuto} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg shadow-indigo-200 uppercase text-[10px] transition-all disabled:opacity-50">
+                    Générer
+                  </button>
+                )}
               </div>
             </div>
-          </div>
+        </div>
+      </div>
 
           {loadingBulk && (
             <div className="text-purple-600 font-black text-xs uppercase animate-pulse">
@@ -440,44 +484,54 @@ const telechargerNiveau = async () => {
             </div>
           )}
           <div className="flex flex-col items-end gap-3">
-            {loadingAuto && <div className="text-indigo-600 font-black text-xs uppercase animate-pulse mb-1">⏳ {generationProgress}</div>}
-            
-            <button
-              onClick={handleAutoGenerateByLevel}
-              disabled={loadingBulk || !selectedNiveau}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50"
-            >
-              ⚡ Générer Niveau
-            </button>
-            <div className="flex flex-wrap gap-2 justify-end">
-              
-              {/* DOWNLOAD ALL CLASSES BUTTON */}
-              <button onClick={telechargerTous} disabled={isPreparingPDF || classes.length === 0} className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50">
-                {isPreparingPDF ? '⏳ PRÉPARATION...' : '📑 TÉLÉCHARGER TOUT (PDF)'}
-              </button>
-              <button
-                onClick={telechargerNiveau}
-                disabled={!selectedNiveau || isPreparingPDF}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50"
-              >
-                📥 Télécharger Niveau
-              </button>
-
-              {/* SINGLE CLASS ACTIONS */}
-              {selectedClasseId && (
-                <>
-                  <button onClick={handleAutoGenerateSingle} disabled={loadingAuto} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg shadow-indigo-200 uppercase text-[10px] transition-all disabled:opacity-50">
-                    🪄 Générer
-                  </button>
-                  <button onClick={openAddModal} disabled={loadingAuto} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-orange-200 uppercase text-[10px] transition-all disabled:opacity-50">
-                    + Séance
-                  </button>
-                  <button onClick={handlePrintSingle} disabled={loadingAuto} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-green-200 uppercase text-[10px] transition-all disabled:opacity-50">
-                    📄 TÉLÉCHARGER CLASSE
-                  </button>
-                </>
-              )}
+            {loadingAuto && <div className="text-indigo-600 font-black text-xs uppercase animate-pulse mb-1">
+            <div className="flex items-center gap-2">
+              <FiLoader size={18} className="animate-spin" />
+              {generationProgress}
             </div>
+          </div>}
+          {/*  BUTTONS LINE (ALL IN ONE ROW) */}
+          <div className="flex flex-wrap items-center gap-2">                
+          {/* DOWNLOAD ALL CLASSES BUTTON */}
+            <button onClick={telechargerTous} disabled={isPreparingPDF || classes.length === 0} className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50">
+              {isPreparingPDF ?( 
+              <div className="flex items-center gap-2">
+                <FiLoader size={18} className="animate-spin" />
+                PRÉPARATION...
+              </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <FiDownload size={18} />
+                  TÉLÉCHARGER TOUT (PDF)
+                </div>
+              )
+              }
+            </button>
+            <button
+              onClick={telechargerNiveau}
+              disabled={!selectedNiveau || isPreparingPDF}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50"
+            >
+              <div className="flex items-center gap-2">
+                <FiDownload size={18} />
+                Télécharger Niveau
+              </div>
+            </button>
+
+            {/* SINGLE CLASS ACTIONS */}
+            {selectedClasseId && (
+              <>
+                <button onClick={openAddModal} disabled={loadingAuto} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-orange-200 uppercase text-[10px] transition-all disabled:opacity-50">
+                  + Séance
+                </button>
+                <button onClick={handlePrintSingle} disabled={loadingAuto} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-green-200 uppercase text-[10px] transition-all disabled:opacity-50">
+                  <div className="flex items-center gap-2">
+                    <FiDownload size={18} />
+                    TÉLÉCHARGER CLASSE
+                  </div>
+                </button>
+              </>
+            )}
           </div>
 
         </div>
@@ -498,14 +552,17 @@ const telechargerNiveau = async () => {
       ) : (
         !selectedNiveau && ( 
         <div className="flex flex-col items-center justify-center py-32 text-gray-300 no-print">
-          <span className="text-6xl mb-4">🏫</span><h2 className="text-2xl font-black uppercase tracking-widest">Sélectionnez une classe</h2>
+          <span className="text-6xl mb-4"><FaSchool /></span><h2 className="text-2xl font-black uppercase tracking-widest">Sélectionnez une classe</h2>
         </div>
         )
       )}
-      {showNiveauTables && selectedNiveau && (
+      {showNiveauTables && selectedNiveau && !selectedClasseId && (
         <div className="mt-10 bg-gray-100 p-6 rounded-2xl">
           <h2 className="text-xl font-black mb-6 uppercase text-gray-800">
-            📚 Emplois du Niveau {selectedNiveau}
+            <div className='flex items-center gap-2'>
+              <FaBook size={18}   />
+              Emplois du Niveau {selectedNiveau}
+            </div>
           </h2>
 
           <div className="space-y-10">
@@ -599,7 +656,11 @@ const telechargerNiveau = async () => {
                 </div>
               </div>
               <div className="flex justify-between pt-6 border-t mt-6">
-                {editingSeanceId ? <button type="button" onClick={handleDeleteSeance} className="px-4 py-2 bg-red-100 text-red-600 rounded-xl hover:bg-red-600 hover:text-white font-black uppercase text-[10px] transition-all">🗑️ Supprimer</button> : <div></div>}
+                {editingSeanceId ? <button type="button" onClick={handleDeleteSeance} className="px-4 py-2 bg-red-100 text-red-600 rounded-xl hover:bg-red-600 hover:text-white font-black uppercase text-[10px] transition-all">
+                  <div className='flex items-center gap-2'>
+                    <FiTrash2 size={18} /> Supprimer
+                  </div>
+                </button> : <div></div>}
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 bg-gray-100 text-gray-500 rounded-xl font-black uppercase text-xs transition-all hover:bg-gray-200">Annuler</button>
                   <button type="submit" className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black uppercase text-xs shadow-lg transition-all hover:bg-indigo-700">✓ Enregistrer</button>

@@ -1,4 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { FiEdit, FiTrash2 } from "react-icons/fi";
+import { MdFolder, MdFolderOpen } from "react-icons/md";
+import { LuSchool, LuBookOpen } from 'react-icons/lu';
+import { FaBook } from "react-icons/fa";
 import axios from 'axios';
 
 export default function Configuration() {
@@ -8,6 +13,8 @@ export default function Configuration() {
   const [activeTab, setActiveTab] = useState('classes'); 
   const [loading, setLoading] = useState(true);
   
+  const navigate = useNavigate();
+  const location = useLocation();
   // --- Classes States ---
   const [classes, setClasses] = useState([]);
   const [expandedGroups, setExpandedGroups] = useState({ 1: true, 2: true, 3: true, 4: true, 5: true, 6: true });
@@ -45,6 +52,14 @@ export default function Configuration() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (location.pathname === '/matieres') {
+      setActiveTab('matieres');
+    } else {
+      setActiveTab('classes');
+    }
+  }, [location.pathname]);
 
   // =========================================================================
   // CLASSES ACTIONS
@@ -158,16 +173,28 @@ export default function Configuration() {
           </div>
           <div className="flex bg-gray-100 p-1 rounded-xl shadow-inner border border-gray-200">
             <button 
-              onClick={() => setActiveTab('classes')} 
-              className={`px-8 py-2.5 rounded-lg font-black text-xs uppercase transition-all ${activeTab === 'classes' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => {
+                setActiveTab('classes');
+                navigate('/classes');
+              }} 
+              className={`px-8 py-2.5 rounded-lg font-black text-xs uppercase transition-all
+                ${activeTab === 'classes' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'
+              }`}
             >
-              🏫 Classes
+              <LuSchool className="text-lg" />
+              Classes
             </button>
             <button 
-              onClick={() => setActiveTab('matieres')} 
-              className={`px-8 py-2.5 rounded-lg font-black text-xs uppercase transition-all ${activeTab === 'matieres' ? 'bg-orange-500 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => {
+                setActiveTab('matieres');
+                navigate('/matieres');
+              }} 
+              className={`px-8 py-2.5 rounded-lg font-black text-xs uppercase transition-all 
+                ${activeTab === 'matieres' ? 'bg-orange-500 text-white shadow-md' : 'text-gray-500 hover:text-gray-700'
+              }`}
             >
-              📚 Matières
+              <LuBookOpen className="text-lg" />
+              Matières
             </button>
           </div>
         </div>
@@ -175,7 +202,7 @@ export default function Configuration() {
         {/* Separator and Add Button */}
         <div className="flex justify-between items-center pt-4 border-t-2 border-gray-50">
           <h2 className="text-lg font-black text-gray-700 uppercase">
-            {activeTab === 'classes' ? 'Arborescence des Classes' : 'Programme des Matières'}
+            {activeTab === 'classes' ? 'Gestion des classe' : 'Programme des Matières'}
           </h2>
           <button 
             onClick={activeTab === 'classes' ? openAddClasse : openAddMatiere} 
@@ -200,7 +227,7 @@ export default function Configuration() {
                 {/* Level Header (Accordion Toggle) */}
                 <div onClick={() => toggleGroup(groupe.niveau)} className="bg-indigo-900 text-white p-4 cursor-pointer flex justify-between items-center select-none hover:bg-indigo-800 transition-colors">
                   <div className="flex items-center gap-3">
-                    <span className="text-xl">{expandedGroups[groupe.niveau] ? '📂' : '📁'}</span>
+                    <span className="text-xl">{expandedGroups[groupe.niveau] ? <MdFolderOpen size={25} /> : <MdFolder size={25} /> }</span>
                     <h3 className="font-black uppercase tracking-widest text-sm">NIVEAU {groupe.niveau}</h3>
                   </div>
                   <span className="bg-indigo-600 text-white px-3 py-1 rounded-full text-[10px] font-black">{groupe.liste.length} Classe(s)</span>
@@ -211,14 +238,30 @@ export default function Configuration() {
                   <div className="p-4 bg-gray-50 border-t border-gray-200">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                       {groupe.liste.map(cls => (
-                        <div key={cls.id} className="bg-white border border-gray-200 hover:border-indigo-300 p-4 rounded-xl flex justify-between items-center shadow-sm hover:shadow-md transition-all group">
-                          <span className="font-black text-sm text-gray-800 uppercase tracking-tight">🏫 {cls.nom_classe}</span>
+                        <div 
+                          key={cls.id}
+                          onClick={() => navigate('/emploi', { state: { classeId: cls.id, niveau: cls.niveau } })}
+                          className="bg-white border border-gray-200 hover:border-indigo-300 p-4 rounded-xl flex justify-between items-center shadow-sm hover:shadow-md transition-all group">
+                          <span className="font-black text-sm text-gray-800 uppercase tracking-tight cursor-pointer">
+                            <div className="flex items-center gap-2">
+                              <LuSchool size={20} />
+                              {cls.nom_classe}
+                            </div>
+                          </span>
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => openEditClasse(cls)} className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-colors" title="Modifier">
-                              ✏️
+                            <button onClick={(e) => {
+                              e.stopPropagation();
+                              openEditClasse(cls);
+                            }}
+                              className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-colors" title="Modifier">
+                              <FiEdit size={18} />
                             </button>
-                            <button onClick={() => handleDelete(cls.id, 'classe')} className="w-8 h-8 flex items-center justify-center bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-colors" title="Supprimer">
-                              🗑️
+                            <button onClick={(e) => { 
+                              e.stopPropagation();
+                              handleDelete(cls.id, 'classe')
+                            }}
+                            className="w-8 h-8 flex items-center justify-center bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-colors" title="Supprimer">
+                              <FiTrash2 size={18} />
                             </button>
                           </div>
                         </div>
@@ -253,15 +296,32 @@ export default function Configuration() {
               ) : (
                 matieres.map(mat => (
                   <tr key={mat.id} className="hover:bg-orange-50/50 transition-colors">
-                    <td className="p-4 font-black text-sm text-gray-800 uppercase">📚 {mat.nom_matiere}</td>
+                    <td className="p-4 font-black text-sm text-gray-800 uppercase">
+                      <span className="flex items-center gap-2">
+                        <span className="text-orange-500">
+                          <FaBook size={18} />
+                        </span>
+                        {mat.nom_matiere}
+                      </span>
+                    </td>
                     <td className="p-4 text-center">
                       <span className="bg-orange-100 text-orange-800 text-[11px] px-3 py-1 rounded-lg font-black shadow-sm">
                         {mat.volume_horaire} Heures
                       </span>
                     </td>
                     <td className="p-4 flex justify-end gap-2">
-                      <button onClick={() => openEditMatiere(mat)} className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white font-bold text-[10px] uppercase transition-colors">Modifier</button>
-                      <button onClick={() => handleDelete(mat.id, 'matiere')} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white font-bold text-[10px] uppercase transition-colors">Supprimer</button>
+                      <button onClick={() => openEditMatiere(mat)} className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white font-bold text-[10px] uppercase transition-colors">
+                        <div className='flex items-center gap-2'>
+                          <FiEdit size={15} />
+                          Modifier
+                        </div>
+                      </button>
+                      <button onClick={() => handleDelete(mat.id, 'matiere')} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white font-bold text-[10px] uppercase transition-colors">
+                        <div className='flex items-center gap-2'>
+                          <FiTrash2 size={15} />
+                          Supprimer
+                        </div>
+                      </button>
                     </td>
                   </tr>
                 ))

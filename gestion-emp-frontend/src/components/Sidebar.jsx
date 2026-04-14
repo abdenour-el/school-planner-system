@@ -45,12 +45,12 @@ export default function Sidebar() {
       {/* ===================================================================== */}
       <div className="h-20 flex items-center justify-center border-b border-gray-100 px-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-500 flex items-center justify-center shadow-md shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow-md shrink-0">
             <span className="text-white text-lg font-bold"><BsBuildings /></span>
           </div>
           {isOpen && (
             <h2 className="font-bold text-gray-800 whitespace-nowrap text-lg">
-              School<span className="text-red-500">Admin</span>
+              School<span className="text-blue-500">Admin</span>
             </h2>
           )}
         </div>
@@ -69,7 +69,7 @@ export default function Sidebar() {
               title={!isOpen ? link.label : ""}
               className={`flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 group ${
                 isActive 
-                  ? 'bg-red-100 text-red-600 font-semibold' 
+                  ? 'bg-blue-100 text-blue-600 font-semibold' 
                   : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
               }`}
             >
@@ -93,7 +93,7 @@ export default function Sidebar() {
           <Link 
             to="/emploi" 
             title={!isOpen ? "Créer Emploi" : ""}
-            className="flex items-center justify-center gap-3 bg-red-500 hover:bg-red-700 text-white rounded-xl px-3 py-3 transition shadow-md"
+            className="flex items-center justify-center gap-3 bg-blue-500 hover:bg-blue-700 text-white rounded-xl px-3 py-3 transition shadow-md"
           >
             <span className="text-xl">
               <BsCalendar3 />
