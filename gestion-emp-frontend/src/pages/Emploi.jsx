@@ -52,7 +52,8 @@ export default function Emploi() {
   // =========================================================================
   // PRINT/DOWNLOAD FUNCTIONS
   // =========================================================================
-  
+  const [showDownloadOptions, setShowDownloadOptions] = useState(false);
+
   const location = useLocation();
   // Print SINGLE class
   const handlePrintSingle = useReactToPrint({
@@ -247,7 +248,7 @@ const telechargerNiveau = async () => {
     setShowNiveauTables(true);
 
     setLoadingBulk(true);
-    setBulkProgress("⏳ Génération en cours...");
+    setBulkProgress("loading");
 
     try {
       const res = await axios.post('http://127.0.0.1:8000/api/generate-all', {
@@ -331,10 +332,7 @@ const telechargerNiveau = async () => {
   // CORE DISPLAY: FUNCTION TO RENDER THE TABLE
   // =========================================================================
   const renderTable = (classeData, seancesData) => (
-    // Removed "min-h-[21cm]" to prevent 64-page overflow bug in printing
-    // <div className="print-container bg-white p-8 rounded-xl shadow-sm print:p-0 print:shadow-none mx-auto w-full max-w-[29.7cm]">
-    <div className="print-container bg-white p-4 rounded-xl shadow-sm print:p-0 print:shadow-none mx-auto w-full max-w-[29.7cm] scale-[0.85] origin-top"
-    >
+    <div className="print-container bg-white p-4 rounded-xl shadow-sm print:p-0 print:shadow-none mx-auto w-full max-w-[29.7cm] scale-[0.85] origin-top">
       {/* HEADER OF THE DOCUMENT */}
       <div className="text-center mb-8 border-b-4 border-black pb-4">
         <h1 className="text-4xl font-black uppercase tracking-tighter text-gray-900 mb-4">EMPLOI DU TEMPS</h1>
@@ -456,7 +454,67 @@ const telechargerNiveau = async () => {
                     {classesFiltrees.map(cls => <option key={cls.id} value={cls.id}>{cls.nom_classe}</option>)}
                   </select>
                 </div>
+                <div className="relative ml-2">
+
+                  <button
+                    onClick={() => setShowDownloadOptions(!showDownloadOptions)}
+                    className="bg-black hover:bg-gray-800 text-white p-2 rounded-xl shadow-lg transition-all"
+                  >
+                    <FiDownload size={18} />
+                  </button>
+
+                  {/* DROPDOWN */}
+                  {showDownloadOptions && (
+                    <div
+                      className="absolute top-12 right-0 bg-white border rounded-xl shadow-lg py-2 z-50 w-56"
+                      onMouseLeave={() => setShowDownloadOptions(false)}
+                    >
+                      <button
+                        onClick={() => {
+                          telechargerTous();
+                          setShowDownloadOptions(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm font-semibold hover:bg-purple-100 hover:text-purple-700"
+                      >
+                        <FiFileText size={16} />
+                        Télécharger tout
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          telechargerNiveau();
+                          setShowDownloadOptions(false);
+                        }}
+                        disabled={!selectedNiveau}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm font-semibold hover:bg-purple-100 hover:text-purple-700 disabled:opacity-40"
+                      >
+                        <FiCalendar size={16} />
+                        Télécharger niveau
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handlePrintSingle();
+                          setShowDownloadOptions(false);
+                        }}
+                        disabled={!selectedClasseId}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm font-semibold hover:bg-purple-100 hover:text-purple-700 disabled:opacity-40"
+                      >
+                        <FaSchool size={16} />
+                        Télécharger classe
+                      </button>
+                    </div>
+                  )}
               </div>
+            </div>
+              {bulkProgress === "loading" && (
+                <div className="text-purple-600 font-black text-xs uppercase animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <FiLoader size={18} className="animate-spin" />
+                    Génération en cours...
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleAutoGenerateByLevel}
@@ -477,64 +535,6 @@ const telechargerNiveau = async () => {
             </div>
         </div>
       </div>
-
-          {loadingBulk && (
-            <div className="text-purple-600 font-black text-xs uppercase animate-pulse">
-              {bulkProgress}
-            </div>
-          )}
-          <div className="flex flex-col items-end gap-3">
-            {loadingAuto && <div className="text-indigo-600 font-black text-xs uppercase animate-pulse mb-1">
-            <div className="flex items-center gap-2">
-              <FiLoader size={18} className="animate-spin" />
-              {generationProgress}
-            </div>
-          </div>}
-          {/*  BUTTONS LINE (ALL IN ONE ROW) */}
-          <div className="flex flex-wrap items-center gap-2">                
-          {/* DOWNLOAD ALL CLASSES BUTTON */}
-            <button onClick={telechargerTous} disabled={isPreparingPDF || classes.length === 0} className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50">
-              {isPreparingPDF ?( 
-              <div className="flex items-center gap-2">
-                <FiLoader size={18} className="animate-spin" />
-                PRÉPARATION...
-              </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <FiDownload size={18} />
-                  TÉLÉCHARGER TOUT (PDF)
-                </div>
-              )
-              }
-            </button>
-            <button
-              onClick={telechargerNiveau}
-              disabled={!selectedNiveau || isPreparingPDF}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-black shadow-lg uppercase text-[10px] transition-all disabled:opacity-50"
-            >
-              <div className="flex items-center gap-2">
-                <FiDownload size={18} />
-                Télécharger Niveau
-              </div>
-            </button>
-
-            {/* SINGLE CLASS ACTIONS */}
-            {selectedClasseId && (
-              <>
-                <button onClick={openAddModal} disabled={loadingAuto} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-orange-200 uppercase text-[10px] transition-all disabled:opacity-50">
-                  + Séance
-                </button>
-                <button onClick={handlePrintSingle} disabled={loadingAuto} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-xl font-black shadow-lg shadow-green-200 uppercase text-[10px] transition-all disabled:opacity-50">
-                  <div className="flex items-center gap-2">
-                    <FiDownload size={18} />
-                    TÉLÉCHARGER CLASSE
-                  </div>
-                </button>
-              </>
-            )}
-          </div>
-
-        </div>
       </div>
 
       {/* 2. VISUALIZATION ZONE */}

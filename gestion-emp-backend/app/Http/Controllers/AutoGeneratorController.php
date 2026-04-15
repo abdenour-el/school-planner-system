@@ -15,7 +15,7 @@ class AutoGeneratorController extends Controller
     public function resetAll()
     {
         Seance::truncate();
-        return response()->json(['message' => 'Toutes les séances ont été effacées.']);
+        return response()->json(['message' => 'Toutes les séances ont été supprimées avec succès.']);
     }
 
     public function generate(Request $request)
@@ -36,9 +36,9 @@ class AutoGeneratorController extends Controller
             
             if ($result['success']) {
                 DB::commit();
-                $msg = '✅ Emploi généré avec succès.';
+                $msg = 'Emploi du temps généré avec succès.';
                 if (count($classesSacrifiees) > 0) {
-                    $msg .= " (L'IA a modifié automatiquement " . count($classesSacrifiees) . " autre(s) classe(s) pour libérer les professeurs !)";
+                    $msg .= " (L'algorithme a automatiquement réorganisé " . count($classesSacrifiees) . " autre(s) classe(s) afin libérer les enseignants.)";
                 }
                 return response()->json(['message' => $msg], 200);
             } else {
@@ -114,7 +114,7 @@ class AutoGeneratorController extends Controller
     {
         $classeId = $classe->id;
         $matieres = Matiere::all();
-        if ($matieres->sum('volume_horaire') != 32) return ['success' => false, 'message' => "Le total doit être de 32h."];
+        if ($matieres->sum('volume_horaire') != 32) return ['success' => false, 'message' => "Le total des heures doit être exactement de 32h."];
 
         // Filter valid teachers for this class level
         $enseignantsParMatiere = Enseignant::all()->filter(function($prof) use ($classe) {
@@ -143,23 +143,23 @@ class AutoGeneratorController extends Controller
 
         // Fetch existing sessions to calculate current loads
         $allSeancesDBArray = Seance::where('classe_id', '!=', $classeId)->get()->toArray();
-        $dbHeuresProfJour = [];
-        $dbSeancesProf = [];
-        $dbTotalHeuresProf = [];
+        $profHoursByDay = [];
+        $profSessions = [];
+        $profTotalHours = [];
 
         foreach($allSeancesDBArray as $s) {
             $eId = $s['enseignant_id'];
             $jour = $s['jour'];
             $duree = (strtotime($s['heure_fin']) - strtotime($s['heure_debut'])) / 3600;
 
-            if(!isset($dbHeuresProfJour[$eId][$jour])) $dbHeuresProfJour[$eId][$jour] = 0;
-            $dbHeuresProfJour[$eId][$jour] += $duree;
+            if(!isset($profHoursByDay[$eId][$jour])) $profHoursByDay[$eId][$jour] = 0;
+            $profHoursByDay[$eId][$jour] += $duree;
 
-            if(!isset($dbTotalHeuresProf[$eId])) $dbTotalHeuresProf[$eId] = 0;
-            $dbTotalHeuresProf[$eId] += $duree;
+            if(!isset($profTotalHours[$eId])) $profTotalHours[$eId] = 0;
+            $profTotalHours[$eId] += $duree;
 
-            if(!isset($dbSeancesProf[$eId][$jour])) $dbSeancesProf[$eId][$jour] = [];
-            $dbSeancesProf[$eId][$jour][] = ['debut' => strtotime($s['heure_debut']), 'fin' => strtotime($s['heure_fin'])];
+            if(!isset($profSessions[$eId][$jour])) $profSessions[$eId][$jour] = [];
+            $profSessions[$eId][$jour][] = ['debut' => strtotime($s['heure_debut']), 'fin' => strtotime($s['heure_fin'])];
         }
 
         // ====================================================================
@@ -172,10 +172,10 @@ class AutoGeneratorController extends Controller
             $profDetails = [];
             
             foreach ($data['enseignants'] as $prof) {
-                $dbHeures = $dbTotalHeuresProf[$prof->id] ?? 0;
+                $dbHeures = $profTotalHours[$prof->id] ?? 0;
                 $dispo = max(0, $prof->max_heures - $dbHeures);
                 $totalAvailableHours += $dispo;
-                $profDetails[] = "   👉 {$prof->nom} {$prof->prenom} (Libre: {$dispo}h / Max: {$prof->max_heures}h)";
+                $profDetails[] = " {$prof->nom} {$prof->prenom} (Libre: {$dispo}h / Max: {$prof->max_heures}h)";
             }
             
             if ($totalAvailableHours < $data['reste']) {
@@ -190,7 +190,7 @@ class AutoGeneratorController extends Controller
         }
 
         $maxRetries = 8000; 
-        $bestSuiviMatiere = [];
+        $bestScheduleState = [];
         $minReste = 999;
 
         // Loop engine for combinatorial attempts
@@ -209,13 +209,13 @@ class AutoGeneratorController extends Controller
                 $isHoly = in_array($mId, $holySubjects);
 
                 foreach ($data['enseignants'] as $prof) {
-                    $dbHeures = $dbTotalHeuresProf[$prof->id] ?? 0;
+                    $dbHeures = $profTotalHours[$prof->id] ?? 0;
                     if (($prof->max_heures - $dbHeures) >= $data['reste']) {
                         
                         // Prevent overloading teachers on Monday/Friday for major subjects
                         if ($isHoly) {
-                            $hLundi = $dbHeuresProfJour[$prof->id]['Lundi'] ?? 0;
-                            $hVendredi = $dbHeuresProfJour[$prof->id]['Vendredi'] ?? 0;
+                            $hLundi = $profHoursByDay[$prof->id]['Lundi'] ?? 0;
+                            $hVendredi = $profHoursByDay[$prof->id]['Vendredi'] ?? 0;
                             if ($hLundi >= 6 || $hVendredi >= 6) continue; 
                         }
 
@@ -249,34 +249,34 @@ class AutoGeneratorController extends Controller
             }
 
             // Conflict and load tracking helpers
-            $getLocalHeures = function($ostadId, $jour) use (&$seancesToCreate) {
-                $h = 0; foreach($seancesToCreate as $s) if($s['enseignant_id'] == $ostadId && $s['jour'] == $jour) $h += $s['duree']; return $h;
+            $getLocalHeures = function($prof_id, $jour) use (&$seancesToCreate) {
+                $h = 0; foreach($seancesToCreate as $s) if($s['enseignant_id'] == $prof_id && $s['jour'] == $jour) $h += $s['duree']; return $h;
             };
 
-            $checkConflict = function($ostadId, $jour, $debut, $fin) use (&$seancesToCreate, &$dbSeancesProf) {
+            $checkConflict = function($prof_id, $jour, $debut, $fin) use (&$seancesToCreate, &$profSessions) {
                 $startTS = strtotime($debut); $endTS = strtotime($fin);
-                if (isset($dbSeancesProf[$ostadId][$jour])) {
-                    foreach ($dbSeancesProf[$ostadId][$jour] as $s) {
+                if (isset($profSessions[$prof_id][$jour])) {
+                    foreach ($profSessions[$prof_id][$jour] as $s) {
                         if ($startTS < $s['fin'] && $s['debut'] < $endTS) return true;
                     }
                 }
                 foreach ($seancesToCreate as $sLocal) {
-                    if ($sLocal['enseignant_id'] == $ostadId && $sLocal['jour'] == $jour) {
+                    if ($sLocal['enseignant_id'] == $prof_id && $sLocal['jour'] == $jour) {
                         if ($startTS < strtotime($sLocal['heure_fin']) && strtotime($sLocal['heure_debut']) < $endTS) return true;
                     }
                 }
                 return false;
             };
 
-            $hasAdjacentClass = function($ostadId, $jour, $debut, $fin) use (&$dbSeancesProf, &$seancesToCreate) {
+            $hasAdjacentClass = function($prof_id, $jour, $debut, $fin) use (&$profSessions, &$seancesToCreate) {
                 $debutTs = strtotime($debut); $finTs = strtotime($fin);
-                if (isset($dbSeancesProf[$ostadId][$jour])) {
-                    foreach ($dbSeancesProf[$ostadId][$jour] as $s) {
+                if (isset($profSessions[$prof_id][$jour])) {
+                    foreach ($profSessions[$prof_id][$jour] as $s) {
                         if ($s['fin'] == $debutTs || $s['debut'] == $finTs) return true;
                     }
                 }
                 foreach ($seancesToCreate as $sLocal) {
-                    if ($sLocal['enseignant_id'] == $ostadId && $sLocal['jour'] == $jour) {
+                    if ($sLocal['enseignant_id'] == $prof_id && $sLocal['jour'] == $jour) {
                         if (strtotime($sLocal['heure_fin']) == $debutTs || strtotime($sLocal['heure_debut']) == $finTs) return true;
                     }
                 }
@@ -294,7 +294,7 @@ class AutoGeneratorController extends Controller
                     if ($suiviMatiere[$mId]['reste'] <= 0) continue;
 
                     $nomMatiere = $suiviMatiere[$mId]['nom'];
-                    $ostadId = $suiviMatiere[$mId]['assigned_prof']->id;
+                    $prof_id = $suiviMatiere[$mId]['assigned_prof']->id;
 
                     $dureeRequise = 2;
             
@@ -308,7 +308,7 @@ class AutoGeneratorController extends Controller
                         $slot = $slots[$k];
                         if ($slot['jour'] != $jourTarget || $slot['filled']) continue;
 
-                        $localHeures = $getLocalHeures($ostadId, $jourTarget);
+                        $localHeures = $getLocalHeures($prof_id, $jourTarget);
                         if ($localHeures >= 6) continue;
 
                         $dureesATester = [];
@@ -323,14 +323,14 @@ class AutoGeneratorController extends Controller
                             if ($localHeures + $dureeRequise > 6) continue;
 
                             $heureFin = date('H:i', strtotime($slot['debut'] . " +{$dureeRequise} hour"));
-                            if ($checkConflict($ostadId, $jourTarget, $slot['debut'], $heureFin)) continue;
+                            if ($checkConflict($prof_id, $jourTarget, $slot['debut'], $heureFin)) continue;
 
                             if ($dureeRequise < $slot['duree']) {
                                 $slots[] = ['jour' => $jourTarget, 'debut' => $heureFin, 'fin' => $slot['fin'], 'duree' => ($slot['duree'] - $dureeRequise), 'filled' => false];
                             }
 
                             $seancesToCreate[] = [
-                                'classe_id' => $classeId, 'enseignant_id' => $ostadId, 'matiere_id' => $mId,
+                                'classe_id' => $classeId, 'enseignant_id' => $prof_id, 'matiere_id' => $mId,
                                 'jour' => $jourTarget, 'heure_debut' => $slot['debut'], 'heure_fin' => $heureFin, 'duree' => $dureeRequise
                             ];
                             $slots[$k]['filled'] = true;
@@ -354,11 +354,11 @@ class AutoGeneratorController extends Controller
             while ($attempts < 150) {
                 $keys = array_keys($suiviMatiere);
                 
-                usort($keys, function($a, $b) use ($suiviMatiere, $isPanicMode, $dbTotalHeuresProf) {
+                usort($keys, function($a, $b) use ($suiviMatiere, $isPanicMode, $profTotalHours) {
                     if ($isPanicMode) {
                         // Prioritize teachers with lowest free time available
-                        $freeA = $suiviMatiere[$a]['assigned_prof']->max_heures - ($dbTotalHeuresProf[$suiviMatiere[$a]['assigned_prof']->id] ?? 0);
-                        $freeB = $suiviMatiere[$b]['assigned_prof']->max_heures - ($dbTotalHeuresProf[$suiviMatiere[$b]['assigned_prof']->id] ?? 0);
+                        $freeA = $suiviMatiere[$a]['assigned_prof']->max_heures - ($profTotalHours[$suiviMatiere[$a]['assigned_prof']->id] ?? 0);
+                        $freeB = $suiviMatiere[$b]['assigned_prof']->max_heures - ($profTotalHours[$suiviMatiere[$b]['assigned_prof']->id] ?? 0);
                         if ($freeA != $freeB) return $freeA <=> $freeB; 
                     }
                     return $suiviMatiere[$b]['reste'] <=> $suiviMatiere[$a]['reste'];
@@ -370,7 +370,7 @@ class AutoGeneratorController extends Controller
                     if ($suiviMatiere[$mId]['reste'] <= 0) continue;
                     
                     $nomMatiere = $suiviMatiere[$mId]['nom'];
-                    $ostadId = $suiviMatiere[$mId]['assigned_prof']->id;
+                    $prof_id = $suiviMatiere[$mId]['assigned_prof']->id;
 
                     $joursShuffled = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi']; 
                     shuffle($joursShuffled);
@@ -392,14 +392,14 @@ class AutoGeneratorController extends Controller
                         
                         $slotKeys = array_keys($slots); 
                         
-                        usort($slotKeys, function($k1, $k2) use ($slots, $is1hStrict, $ostadId, $jour, $hasAdjacentClass, $isRelaxedMode) {
+                        usort($slotKeys, function($k1, $k2) use ($slots, $is1hStrict, $prof_id, $jour, $hasAdjacentClass, $isRelaxedMode) {
                             $slotA = $slots[$k1];
                             $slotB = $slots[$k2];
                             if ($is1hStrict && $slotA['duree'] != $slotB['duree']) return $slotA['duree'] <=> $slotB['duree']; 
                             if (!$is1hStrict && $slotA['duree'] != $slotB['duree']) return $slotB['duree'] <=> $slotA['duree']; 
                             if (!$isRelaxedMode) {
-                                $adjA = $hasAdjacentClass($ostadId, $jour, $slotA['debut'], $slotA['fin']) ? 1 : 0;
-                                $adjB = $hasAdjacentClass($ostadId, $jour, $slotB['debut'], $slotB['fin']) ? 1 : 0;
+                                $adjA = $hasAdjacentClass($prof_id, $jour, $slotA['debut'], $slotA['fin']) ? 1 : 0;
+                                $adjB = $hasAdjacentClass($prof_id, $jour, $slotB['debut'], $slotB['fin']) ? 1 : 0;
                                 if ($adjA != $adjB) return $adjB <=> $adjA;
                             }
                             return rand(-1, 1); 
@@ -409,7 +409,7 @@ class AutoGeneratorController extends Controller
                             $slot = $slots[$k];
                             if ($slot['filled'] || $slot['jour'] != $jour) continue;
 
-                            $localHeures = $getLocalHeures($ostadId, $jour);
+                            $localHeures = $getLocalHeures($prof_id, $jour);
                             if ($localHeures >= 6) continue; 
 
                             $maxPossible = min(2, $suiviMatiere[$mId]['reste'], $slot['duree'], (6 - $localHeures));
@@ -464,14 +464,14 @@ class AutoGeneratorController extends Controller
                             if ($slot['debut'] < '13:00' && $heureFin > '13:00') continue;
                             if ($slot['debut'] >= '16:00' && $heureFin > '19:00') continue;
 
-                            if ($checkConflict($ostadId, $jour, $slot['debut'], $heureFin)) continue;
+                            if ($checkConflict($prof_id, $jour, $slot['debut'], $heureFin)) continue;
 
                             if ($dureeA_Prendre < $slot['duree']) {
                                 $slots[] = ['jour' => $jour, 'debut' => $heureFin, 'fin' => $slot['fin'], 'duree' => ($slot['duree'] - $dureeA_Prendre), 'filled' => false];
                             }
 
                             $seancesToCreate[] = [
-                                'classe_id' => $classeId, 'enseignant_id' => $ostadId, 'matiere_id' => $mId,
+                                'classe_id' => $classeId, 'enseignant_id' => $prof_id, 'matiere_id' => $mId,
                                 'jour' => $jour, 'heure_debut' => $slot['debut'], 'heure_fin' => $heureFin, 'duree' => $dureeA_Prendre
                             ];
                             
@@ -486,10 +486,10 @@ class AutoGeneratorController extends Controller
                 $attempts++;
             }
 
-            $sway3Baqin = collect($suiviMatiere)->sum('reste');
+            $remainingHours = collect($suiviMatiere)->sum('reste');
             
             // If completely successful, save to DB
-            if ($sway3Baqin == 0) { 
+            if ($remainingHours == 0) { 
                 foreach ($seancesToCreate as &$s) { 
                     unset($s['duree']); 
                     Seance::create($s); 
@@ -498,17 +498,17 @@ class AutoGeneratorController extends Controller
             }
             
             // Track the best attempt
-            if ($sway3Baqin < $minReste) { 
-                $minReste = $sway3Baqin; 
-                $bestSuiviMatiere = $suiviMatiere; 
+            if ($remainingHours < $minReste) { 
+                $minReste = $remainingHours; 
+                $bestScheduleState = $suiviMatiere; 
             }
         }
 
-        // Fallback if bestSuiviMatiere is completely empty (Rare)
-        if (empty($bestSuiviMatiere)) {
+        // Fallback if bestScheduleState is completely empty (Rare)
+        if (empty($bestScheduleState)) {
             return [
                 'success' => false, 
-                'message' => "❌ CONFLIT D'HORAIRE COMPLEXE :\nImpossible de trouver une combinaison valide pour cette classe, même avec assez d'heures. Modifiez manuellement ou libérez plus d'espace.",
+                'message' => "❌ CONFLIT D'HORAIRE COMPLEXE :\nImpossible de générer une solution valide avec les contraintes actuelles. Modifiez manuellement ou libérez plus d'espace.",
                 'blocking_prof_id' => null
             ];
         }
@@ -516,13 +516,13 @@ class AutoGeneratorController extends Controller
         // IDENTIFY BLOCKING PROFESSOR FOR BULLDOZER
         $blockingProfId = null;
         $erreurs = [];
-        foreach ($bestSuiviMatiere as $mId => $data) {
+        foreach ($bestScheduleState as $mId => $data) {
             if ($data['reste'] > 0) {
                 $prof = $data['assigned_prof'];
                 if ($prof && !$blockingProfId) {
                     $blockingProfId = $prof->id; 
                 }
-                $erreurs[] = "📌 {$data['nom']} : Le professeur " . ($prof ? $prof->nom : 'Inconnu') . " n'a pas pu être placé à cause d'un conflit d'horaire complexe avec une autre classe.";
+                $erreurs[] = "{$data['nom']} : Le professeur " . ($prof ? $prof->nom : 'Inconnu') . " n'a pas pu être placé à cause d'un conflit d'horaire complexe avec une autre classe.";
             }
         }
         
@@ -545,7 +545,7 @@ class AutoGeneratorController extends Controller
 
         if ($classes->isEmpty()) {
             return response()->json([
-                'message' => "Aucune classe pour ce niveau."
+                'message' => "Aucune classe trouvée pour ce niveau."
             ], 404);
         }
 

@@ -100,7 +100,7 @@ export default function Sidebar() {
             </span>
             {isOpen && (
               <span className="font-semibold text-sm">
-                Créer Emploi
+                Gérer les emplois
               </span>
             )}
           </Link>
