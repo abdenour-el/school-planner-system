@@ -50,7 +50,7 @@ export default function Sidebar() {
           </div>
           {isOpen && (
             <h2 className="font-bold text-gray-800 whitespace-nowrap text-lg">
-              School<span className="text-blue-500">Admin</span>
+              IQRAE
             </h2>
           )}
         </div>
@@ -110,7 +110,7 @@ export default function Sidebar() {
       {/* ===================================================================== */}
       {/* 5. USER PROFILE (FOOTER)                                              */}
       {/* ===================================================================== */}
-      <div className="p-4 border-t border-gray-100">
+      {/* <div className="p-4 border-t border-gray-100">
         <div className={`flex items-center gap-3 ${isOpen ? 'justify-start' : 'justify-center'}`}>
           <div className="w-9 h-9 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center font-bold text-xs">
             US
@@ -124,7 +124,7 @@ export default function Sidebar() {
             </div>
           )}
         </div>
-      </div>
+      </div> */}
 
     </aside>
   );

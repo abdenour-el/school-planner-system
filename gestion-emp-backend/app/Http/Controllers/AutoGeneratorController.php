@@ -68,35 +68,52 @@ class AutoGeneratorController extends Controller
             return ['success' => true];
         }
         
-        // 3. If it fails, check depth limit (Max 4 classes to avoid infinite loops)
-        if ($depth >= 4) {
+        // 3. If it fails, check depth limit (Max 6 classes to avoid infinite loops)
+        if ($depth >= 6) {
             return $result; 
         }
         
         $blockingProfId = $result['blocking_prof_id'] ?? null;
         
         if ($blockingProfId) {
-            // Find an older class using this blocking professor to "steal" their hours
-            $seanceToSacrifice = Seance::where('enseignant_id', $blockingProfId)
+            // Find older classes using this blocking professor to "steal" their hours
+            // Using limit(2) to tear down up to 2 classes at once!
+            $classesToSacrifice = Seance::select('classe_id')
+                                       ->where('enseignant_id', $blockingProfId)
                                        ->where('classe_id', '!=', $classe->id)
                                        ->whereNotIn('classe_id', $sacrificedClasses)
+                                       ->groupBy('classe_id')
                                        ->inRandomOrder()
-                                       ->first();
+                                       ->limit(2)
+                                       ->get();
             
-            if ($seanceToSacrifice) {
-                $sacrificedClassId = $seanceToSacrifice->classe_id;
-                $sacrificedClasses[] = $sacrificedClassId; // Add to blacklist
+            if ($classesToSacrifice->isNotEmpty()) {
+                $idsToRebuild = [];
                 
-                // DESTROY THE BLOCKING CLASS
-                Seance::where('classe_id', $sacrificedClassId)->delete();
+                // 4. DESTROY THE BLOCKING CLASSES (up to 2 classes)
+                foreach ($classesToSacrifice as $st) {
+                    $sacrificedClassId = $st->classe_id;
+                    $idsToRebuild[] = $sacrificedClassId;
+                    $sacrificedClasses[] = $sacrificedClassId; // Add to blacklist
+                    
+                    Seance::where('classe_id', $sacrificedClassId)->delete();
+                }
                 
-                // Retry generating the current class (The professor is now free)
+                // 5. Retry generating the current class (The professor is now free)
                 $retryResult = $this->runAlgorithm($classe);
                 
                 if ($retryResult['success']) {
-                    // Success! Now we must recursively rebuild the class we just destroyed
-                    $classeASacrifier = Classe::find($sacrificedClassId);
-                    return $this->resolveWithBulldozer($classeASacrifier, $depth + 1, $sacrificedClasses);
+                    // Success! Now we must recursively rebuild ALL the classes we just destroyed
+                    foreach ($idsToRebuild as $idRebuild) {
+                        $classToRebuild = Classe::find($idRebuild);
+                        $rebuildResult = $this->resolveWithBulldozer($classToRebuild, $depth + 1, $sacrificedClasses);
+                        
+                        // If rebuilding one of the sacrificed classes fails, we fail the whole chain
+                        if (!$rebuildResult['success']) {
+                            return $rebuildResult;
+                        }
+                    }
+                    return ['success' => true];
                 } else {
                     // Failed again despite destruction
                     return $retryResult;

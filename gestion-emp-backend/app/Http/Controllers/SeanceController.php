@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Seance;
+use App\Models\Classe; // 🚨 Zedt had l-Model hna bash n-khdmo bih f clearNiveau
 use Illuminate\Http\Request;
 
 class SeanceController extends Controller
@@ -53,7 +54,7 @@ class SeanceController extends Controller
             $nomProf = $conflitClasse->enseignant ? $conflitClasse->enseignant->nom : 'un autre prof';
             $hDebut = substr($conflitClasse->heure_debut, 0, 5);
             $hFin = substr($conflitClasse->heure_fin, 0, 5);
-            return response()->json(['message' => "❌ Impossible : Cette classe étudie déjà avec l'Ostad {$nomProf} de {$hDebut} à {$hFin}."], 422);
+            return response()->json(['message' => "❌ Impossible : Cette classe étudie déjà avec Le professeur {$nomProf} de {$hDebut} à {$hFin}."], 422);
         }
 
         // SCAN 2 : Vérifier si le PROFESSEUR est déjà dans une autre classe à cette heure
@@ -69,7 +70,7 @@ class SeanceController extends Controller
             $nomClasse = $conflitProf->classe ? $conflitProf->classe->nom_classe : 'une autre classe';
             $hDebut = substr($conflitProf->heure_debut, 0, 5);
             $hFin = substr($conflitProf->heure_fin, 0, 5);
-            return response()->json(['message' => "❌ Impossible : L'Ostad est déjà occupé avec {$nomClasse} de {$hDebut} à {$hFin}."], 422);
+            return response()->json(['message' => "❌ Impossible : Le professeur est déjà occupé avec {$nomClasse} de {$hDebut} à {$hFin}."], 422);
         }
 
         // Si tout est propre, on ajoute la séance
@@ -114,7 +115,7 @@ class SeanceController extends Controller
             $nomProf = $conflitClasse->enseignant ? $conflitClasse->enseignant->nom : 'un autre prof';
             $hDebut = substr($conflitClasse->heure_debut, 0, 5);
             $hFin = substr($conflitClasse->heure_fin, 0, 5);
-            return response()->json(['message' => "❌ Impossible : Cette classe étudie déjà avec l'Ostad {$nomProf} de {$hDebut} à {$hFin}."], 422);
+            return response()->json(['message' => "❌ Impossible : Cette classe étudie déjà avec Le professeur {$nomProf} de {$hDebut} à {$hFin}."], 422);
         }
 
         // SCAN 2 : Vérifier le PROFESSEUR (en ignorant l'ID de la séance qu'on est en train de modifier)
@@ -131,7 +132,7 @@ class SeanceController extends Controller
             $nomClasse = $conflitProf->classe ? $conflitProf->classe->nom_classe : 'une autre classe';
             $hDebut = substr($conflitProf->heure_debut, 0, 5);
             $hFin = substr($conflitProf->heure_fin, 0, 5);
-            return response()->json(['message' => "❌ Impossible : L'Ostad est déjà occupé avec {$nomClasse} de {$hDebut} à {$hFin}."], 422);
+            return response()->json(['message' => "❌ Impossible : Le professeur est déjà occupé avec {$nomClasse} de {$hDebut} à {$hFin}."], 422);
         }
 
         // Si tout est propre, on met à jour
@@ -146,5 +147,41 @@ class SeanceController extends Controller
     {
         Seance::destroy($id);
         return response()->json(['message' => 'Séance supprimée avec succès.']);
+    }
+
+    // =========================================================================
+    // 6. VIDER L'EMPLOI D'UNE CLASSE
+    // =========================================================================
+    public function clearClasse($classe_id)
+    {
+        Seance::where('classe_id', $classe_id)->delete();
+        return response()->json(['message' => 'L\'emploi de cette classe a été vidé avec succès.']);
+    }
+
+    // =========================================================================
+    // 7. VIDER TOUS LES EMPLOIS D'UN NIVEAU
+    // =========================================================================
+    public function clearNiveau(Request $request)
+    {
+        $request->validate([
+            'niveau' => 'required|integer'
+        ]);
+
+        // Jbed ga3 les IDs dyal les classes li f had Niveau
+        $classesIds = Classe::where('niveau', $request->niveau)->pluck('id');
+        
+        // Msse7 ga3 les séances dyalhom f deqqa
+        Seance::whereIn('classe_id', $classesIds)->delete();
+
+        return response()->json(['message' => "Tous les emplois du niveau {$request->niveau} ont été vidés."]);
+    }
+
+    // =========================================================================
+    // 8. VIDER TOUTE LA BASE DE DONNÉES (RESET GLOBAL)
+    // =========================================================================
+    public function resetAll()
+    {
+        Seance::truncate();
+        return response()->json(['message' => 'Tous les emplois ont été effacés avec succès.']);
     }
 }
