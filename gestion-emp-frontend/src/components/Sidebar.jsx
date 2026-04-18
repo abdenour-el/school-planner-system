@@ -1,48 +1,56 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { BsHouseDoor, BsGear, BsPeople, BsCalendar3,BsBuildings, BsChevronLeft, BsChevronRight } from "react-icons/bs";
-
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { BsHouseDoor, BsGear, BsPeople, BsCalendar3, BsBuildings, BsChevronLeft, BsChevronRight, BsBoxArrowRight } from "react-icons/bs";
+import { FiUser } from "react-icons/fi"; // 👈 Zidna l-Icon dyal Utilisateur
+import axiosClient from '../axiosClient';
 
 export default function Sidebar() {
-  // =========================================================================
-  // STATE TO MANAGE SIDEBAR TOGGLE (OPEN / CLOSED)
-  // =========================================================================
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
 
   // =========================================================================
-  // NAVIGATION MENU DATA
+  // NAVIGATION MENU DATA (L-FOQ)
   // =========================================================================
   const navLinks = [
     { path: '/', label: 'Accueil', icon: <BsHouseDoor /> },
     { path: '/classes', label: 'Configuration', icon: <BsGear /> },
-    { path: '/enseignants', label: 'Enseignants', icon: <BsPeople />  },
+    { path: '/enseignants', label: 'Enseignants', icon: <BsPeople /> },
   ];
 
+  // =========================================================================
+  // LOGOUT HANDLER
+  // =========================================================================
+  const handleLogout = async () => {
+    if (!window.confirm("Voulez-vous vraiment vous déconnecter ?")) return;
+
+    try {
+        await axiosClient.post('/logout');
+    } catch (error) {
+        console.error("Logout error", error);
+    } finally {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_name');
+        navigate('/login');
+    }
+  };
+
   return (
-    // 'sticky top-0 h-screen' makes it stay on the screen while scrolling
     <aside 
       className={`sticky top-0 h-screen bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ease-in-out z-50 ${
         isOpen ? 'w-64' : 'w-20'
       }`}
     >
-      {/* ===================================================================== */}
-      {/* 1. MODERN FLOATING TOGGLE BUTTON                                      */}
-      {/* ===================================================================== */}
+      {/* 1. TOGGLE BUTTON */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="absolute -right-3.5 top-9 bg-white hover:bg-gray-100 w-7 h-7 rounded-full flex items-center justify-center text-gray-600 text-[10px] shadow-md border border-gray-300 transition-all z-50"
+        className="absolute -right-3.5 top-9 bg-white hover:bg-gray-100 w-7 h-7 rounded-full flex items-center justify-center text-gray-600 text-[10px] shadow-md border border-gray-300 transition-all z-50 cursor-pointer"
         title={isOpen ? "Réduire" : "Agrandir"}
       >
-        {isOpen 
-          ? <BsChevronLeft />
-          : <BsChevronRight />
-        }
+        {isOpen ? <BsChevronLeft /> : <BsChevronRight />}
       </button>
 
-      {/* ===================================================================== */}
-      {/* 2. BRANDING / LOGO AREA                                               */}
-      {/* ===================================================================== */}
+      {/* 2. LOGO */}
       <div className="h-20 flex items-center justify-center border-b border-gray-100 px-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow-md shrink-0">
@@ -56,9 +64,7 @@ export default function Sidebar() {
         </div>
       </div>
       
-      {/* ===================================================================== */}
-      {/* 3. NAVIGATION LINKS                                                   */}
-      {/* ===================================================================== */}
+      {/* 3. MAIN LINKS */}
       <nav className="flex-1 py-6 px-2 space-y-2 overflow-y-auto">
         {navLinks.map((link) => {
           const isActive = location.pathname === link.path;
@@ -67,7 +73,7 @@ export default function Sidebar() {
               key={link.path}
               to={link.path} 
               title={!isOpen ? link.label : ""}
-              className={`flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 group ${
+              className={`flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 group cursor-pointer ${
                 isActive 
                   ? 'bg-blue-100 text-blue-600 font-semibold' 
                   : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
@@ -76,7 +82,6 @@ export default function Sidebar() {
               <span className={`text-xl transition ${isActive ? 'scale-110' : 'group-hover:scale-110'}`}>
                 {link.icon}
               </span>
-              
               {isOpen && (
                 <span className="text-sm">
                   {link.label}
@@ -86,20 +91,18 @@ export default function Sidebar() {
           );
         })}
 
-        {/* ===================================================================== */}
-        {/* 4. PREMIUM CALL TO ACTION (CRÉER EMPLOI)                              */}
-        {/* ===================================================================== */}
+        {/* 4. CREER EMPLOI BUTTON */}
         <div className="pt-8 px-1">
           <Link 
             to="/emploi" 
             title={!isOpen ? "Créer Emploi" : ""}
-            className="flex items-center justify-center gap-3 bg-blue-500 hover:bg-blue-700 text-white rounded-xl px-3 py-3 transition shadow-md"
+            className="flex items-center justify-center gap-3 bg-blue-500 hover:bg-blue-700 text-white rounded-xl px-3 py-3 transition shadow-md cursor-pointer"
           >
             <span className="text-xl">
               <BsCalendar3 />
             </span>
             {isOpen && (
-              <span className="font-semibold text-sm">
+              <span className="font-semibold text-sm whitespace-nowrap">
                 Gérer les emplois
               </span>
             )}
@@ -108,23 +111,50 @@ export default function Sidebar() {
       </nav>
 
       {/* ===================================================================== */}
-      {/* 5. USER PROFILE (FOOTER)                                              */}
+      {/* 5. FOOTER (UTILISATEURS + LOGOUT)                                     */}
       {/* ===================================================================== */}
-      {/* <div className="p-4 border-t border-gray-100">
-        <div className={`flex items-center gap-3 ${isOpen ? 'justify-start' : 'justify-center'}`}>
-          <div className="w-9 h-9 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center font-bold text-xs">
-            US
-          </div>
+      <div className="p-4 border-t border-gray-100 mt-auto flex flex-col gap-2">
+        
+        {/* BOUTON UTILISATEURS (ADMIN) */}
+        <Link 
+          to="/utilisateurs"
+          title={!isOpen ? "Utilisateurs" : ""}
+          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all shadow-sm cursor-pointer ${
+            location.pathname === '/utilisateurs'
+              ? 'bg-gray-800 text-white' 
+              : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
+          } ${isOpen ? 'justify-start' : 'justify-center'}`}
+        >
+          <span className="text-xl">
+            <FiUser />
+          </span>
           {isOpen && (
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold text-gray-800">User</span>
-              <span className="text-[10px] text-green-500 flex items-center gap-1">
-                ● En ligne
-              </span>
-            </div>
+            <span className="font-black text-xs uppercase tracking-widest whitespace-nowrap">
+              Utilisateurs
+            </span>
           )}
-        </div>
-      </div> */}
+        </Link>
+
+        {/* BOUTON DECONNEXION */}
+        <button 
+          onClick={handleLogout}
+          title={!isOpen ? "Déconnexion" : ""}
+          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all shadow-sm cursor-pointer ${
+            isOpen 
+              ? 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white justify-start' 
+              : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white justify-center'
+          }`}
+        >
+          <span className="text-xl">
+            <BsBoxArrowRight />
+          </span>
+          {isOpen && (
+            <span className="font-black text-xs uppercase tracking-widest whitespace-nowrap">
+              Déconnexion
+            </span>
+          )}
+        </button>
+      </div>
 
     </aside>
   );

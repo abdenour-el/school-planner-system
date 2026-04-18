@@ -1,52 +1,70 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import axios from 'axios';
+import axiosClient from '../axiosClient';
 import { useReactToPrint } from 'react-to-print';
 import { useLocation } from 'react-router-dom';
 import { FiCalendar, FiDownload, FiFileText, FiTrash2, FiLoader, FiX, FiPlus, FiBell } from 'react-icons/fi';
 import { MdAutoAwesome, MdOutlineCalendarMonth } from 'react-icons/md';
 import { FaSchool, FaBook } from 'react-icons/fa';
-import toast, { Toaster } from 'react-hot-toast'; // 👈 IMPORT TOAST
+import toast, { Toaster } from 'react-hot-toast'; 
 
 export default function Emploi() {
-  // --- Data states ---
+  // =========================================================================
+  // DATA STATES
+  // =========================================================================
   const [classes, setClasses] = useState([]);
   const [matieres, setMatieres] = useState([]);
   const [enseignants, setEnseignants] = useState([]);
   
-  // --- Selection states ---
+  // =========================================================================
+  // SELECTION STATES
+  // =========================================================================
   const [selectedNiveau, setSelectedNiveau] = useState('');
   const [selectedClasseId, setSelectedClasseId] = useState('');
   
-  // --- Schedule states ---
+  // =========================================================================
+  // SCHEDULE STATES
+  // =========================================================================
   const [seances, setSeances] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // --- Niveau display + print ---
+  // =========================================================================
+  // NIVEAU DISPLAY & PRINT STATES
+  // =========================================================================
   const [allSeancesNiveau, setAllSeancesNiveau] = useState([]);
   const [showNiveauTables, setShowNiveauTables] = useState(false);
   const niveauComponentRef = useRef(null);
   
-  // --- Auto-generation states ---
+  // =========================================================================
+  // AUTO-GENERATION STATES
+  // =========================================================================
   const [loadingAuto, setLoadingAuto] = useState(false);
   const [loadingBulk, setLoadingBulk] = useState(false);
   const [bulkProgress, setBulkProgress] = useState('');
 
-  // --- Modal states (Add/Edit) ---
+  // =========================================================================
+  // MODAL STATES (ADD / EDIT)
+  // =========================================================================
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSeanceId, setEditingSeanceId] = useState(null); 
   const [formData, setFormData] = useState({
     matiere_id: '', enseignant_id: '', jour: 'Lundi', heure_debut: '09:00', heure_fin: '11:00'
   });
 
-  // --- States for "DOWNLOAD ALL" feature ---
+  // =========================================================================
+  // STATES FOR "DOWNLOAD ALL" FEATURE
+  // =========================================================================
   const [allSeances, setAllSeances] = useState([]);
   const allComponentRef = useRef(null);
 
-  // --- Dropdowns States ---
+  // =========================================================================
+  // DROPDOWN MENUS STATES
+  // =========================================================================
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
   const [showClearOptions, setShowClearOptions] = useState(false);
   
-  // --- NEW: Notification History State ---
+  // =========================================================================
+  // NOTIFICATION HISTORY STATE
+  // =========================================================================
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -72,14 +90,12 @@ export default function Emploi() {
       type,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-    setNotifications(prev => [newNotif, ...prev]); // Add to top of the list
+    setNotifications(prev => [newNotif, ...prev]); 
   };
 
-
   // =========================================================================
-  // PRINT/DOWNLOAD FUNCTIONS
+  // PRINT & DOWNLOAD FUNCTIONS
   // =========================================================================
-  
   const handlePrintSingle = useReactToPrint({
     contentRef: componentRef,
     documentTitle: selectedClasse ? `Emploi_${selectedClasse.nom_classe}` : 'Emploi_Classe',
@@ -93,7 +109,7 @@ export default function Emploi() {
   const telechargerTous = async () => {
     if (!window.confirm("Générer le PDF pour TOUTES les classes ? Cela peut prendre quelques secondes.")) return;
     try {
-      const res = await axios.get('http://127.0.0.1:8000/api/seances');
+      const res = await axiosClient.get('/seances');
       setAllSeances(res.data);
       setTimeout(() => {
         handlePrintAll();
@@ -118,7 +134,7 @@ export default function Emploi() {
     if (!window.confirm(`Télécharger les emplois du niveau ${selectedNiveau} ?`)) return;
 
     try {
-      const res = await axios.get('http://127.0.0.1:8000/api/seances');
+      const res = await axiosClient.get('/seances');
       const classesNiveau = classes.filter(c => c.niveau === parseInt(selectedNiveau));
       const ids = classesNiveau.map(c => c.id);
       const filtered = res.data.filter(s => ids.includes(s.classe_id));
@@ -138,14 +154,13 @@ export default function Emploi() {
   // =========================================================================
   // DATA FETCHING (CRUD)
   // =========================================================================
-
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
         const [resCls, resMat, resEns] = await Promise.all([
-          axios.get('http://127.0.0.1:8000/api/classes'),
-          axios.get('http://127.0.0.1:8000/api/matieres'),
-          axios.get('http://127.0.0.1:8000/api/enseignants')
+          axiosClient.get('/classes'),
+          axiosClient.get('/matieres'),
+          axiosClient.get('/enseignants')
         ]);
         setClasses(resCls.data); 
         setMatieres(resMat.data); 
@@ -161,7 +176,7 @@ export default function Emploi() {
     if (!selectedClasseId) return;
     setLoading(true);
     try {
-      const res = await axios.get(`http://127.0.0.1:8000/api/seances?classe_id=${selectedClasseId}`);
+      const res = await axiosClient.get(`/seances?classe_id=${selectedClasseId}`);
       setSeances(res.data);
     } catch (error) { 
       console.error(error); 
@@ -185,7 +200,7 @@ export default function Emploi() {
     const fetchNiveauSeances = async () => {
       if (selectedNiveau && !selectedClasseId) {
         try {
-          const res = await axios.get('http://127.0.0.1:8000/api/seances');
+          const res = await axiosClient.get('/seances');
           const classesNiveau = classes.filter(c => c.niveau === parseInt(selectedNiveau));
           const ids = classesNiveau.map(c => c.id);
           const filtered = res.data.filter(s => ids.includes(s.classe_id));
@@ -213,14 +228,13 @@ export default function Emploi() {
   // =========================================================================
   // GENERATION & CLEAR FUNCTIONS
   // =========================================================================
-
   const handleAutoGenerateSingle = async () => {
     if (!selectedClasseId) return;
     if (!window.confirm("⚠️ Attention: L'emploi actuel de cette classe sera écrasé. Continuer ?")) return;
     
     setLoadingAuto(true);
     try {
-      const res = await axios.post('http://127.0.0.1:8000/api/generate-emploi', { classe_id: selectedClasseId });
+      const res = await axiosClient.post('/generate-emploi', { classe_id: selectedClasseId });
       notify(res.data.message, 'success');
       fetchEmploi();
     } catch (err) {
@@ -240,7 +254,7 @@ export default function Emploi() {
     setBulkProgress("loading");
 
     try {
-      const res = await axios.post('http://127.0.0.1:8000/api/generate-all', { niveau: selectedNiveau });
+      const res = await axiosClient.post('/generate-all', { niveau: selectedNiveau });
       notify(res.data.message, 'success');
       fetchEmploi();
     } catch (err) {
@@ -256,7 +270,7 @@ export default function Emploi() {
     if (!window.confirm(`Voulez-vous vraiment vider l'emploi de la classe sélectionnée ?`)) return;
     
     try {
-      await axios.delete(`http://127.0.0.1:8000/api/seances/clear-classe/${selectedClasseId}`);
+      await axiosClient.delete(`/seances/clear-classe/${selectedClasseId}`);
       fetchEmploi();
       notify("L'emploi de la classe a été vidé.", 'success');
     } catch {
@@ -269,7 +283,7 @@ export default function Emploi() {
     if (!window.confirm(`⚠️ ATTENTION : Voulez-vous vraiment vider TOUS les emplois du Niveau ${selectedNiveau} ?`)) return;
     
     try {
-      await axios.post(`http://127.0.0.1:8000/api/seances/clear-niveau`, { niveau: selectedNiveau });
+      await axiosClient.post(`/seances/clear-niveau`, { niveau: selectedNiveau });
       fetchEmploi();
       if(selectedNiveau && !selectedClasseId) setAllSeancesNiveau([]); 
       notify(`Tous les emplois du Niveau ${selectedNiveau} ont été vidés.`, 'success');
@@ -282,7 +296,7 @@ export default function Emploi() {
     if (!window.confirm("🚨 ALERTE ROUGE : Voulez-vous vraiment vider TOUTE la base de données des emplois ? Cette action est irréversible !")) return;
     
     try {
-      await axios.post('http://127.0.0.1:8000/api/seances/reset'); 
+      await axiosClient.post('/seances/reset'); 
       setSeances([]);
       setAllSeancesNiveau([]);
       notify("Tous les emplois ont été effacés avec succès.", 'success');
@@ -292,9 +306,8 @@ export default function Emploi() {
   };
 
   // =========================================================================
-  // MODALS (Add/Edit)
+  // MODALS (ADD / EDIT)
   // =========================================================================
-
   const openAddModal = () => {
     if (!selectedClasseId) { notify("Choisissez une classe d'abord.", 'error'); return; }
     setEditingSeanceId(null);
@@ -319,10 +332,10 @@ export default function Emploi() {
     const payload = { ...formData, classe_id: selectedClasseId };
     try {
       if (editingSeanceId) {
-        await axios.put(`http://127.0.0.1:8000/api/seances/${editingSeanceId}`, payload);
+        await axiosClient.put(`/seances/${editingSeanceId}`, payload);
         notify("Séance modifiée avec succès.", 'success');
       } else {
-        await axios.post('http://127.0.0.1:8000/api/seances', payload);
+        await axiosClient.post('/seances', payload);
         notify("Séance ajoutée avec succès.", 'success');
       }
       setIsModalOpen(false); 
@@ -335,7 +348,7 @@ export default function Emploi() {
   const handleDeleteSeance = async () => {
     if (!window.confirm("Supprimer cette séance ?")) return;
     try {
-      await axios.delete(`http://127.0.0.1:8000/api/seances/${editingSeanceId}`);
+      await axiosClient.delete(`/seances/${editingSeanceId}`);
       notify("Séance supprimée.", 'success');
       setIsModalOpen(false); 
       fetchEmploi();
@@ -345,9 +358,8 @@ export default function Emploi() {
   };
 
   // =========================================================================
-  // GRID STYLING & RENDER TABLE
+  // GRID STYLING & TABLE RENDERER
   // =========================================================================
-  
   const getGridStyleMatin = (debut, fin) => {
     const hDebut = parseInt(debut.substring(0, 2));
     const hFin = parseInt(fin.substring(0, 2));
@@ -446,7 +458,7 @@ export default function Emploi() {
 
   return (
     <div className="bg-gray-50 p-6 min-h-screen">
-      <Toaster position="top-right" reverseOrder={false} /> {/* 👈 TOAST PROVIDER HNA */}
+      <Toaster position="top-right" reverseOrder={false} />
 
       {/* 1. CONTROL PANEL */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 no-print">
@@ -462,7 +474,7 @@ export default function Emploi() {
 
             <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
               <div className="flex flex-wrap items-center gap-3">
-                {/* Niveau */}
+                {/* Niveau Selector */}
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Niveau:</span>
                   <select className="border-2 border-indigo-200 bg-white text-indigo-900 font-black px-4 py-2 rounded-lg text-xs outline-none focus:border-indigo-600 shadow-sm cursor-pointer" value={selectedNiveau} onChange={e => setSelectedNiveau(e.target.value)}>
@@ -470,7 +482,7 @@ export default function Emploi() {
                     {niveauxDisponibles.map(niv => <option key={niv} value={niv}>Niveau {niv}</option>)}
                   </select>
                 </div>
-                {/* Classe */}
+                {/* Classe Selector */}
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-black text-gray-500 uppercase tracking-widest">Classe:</span>
                   <select className="border-2 border-indigo-200 bg-white text-indigo-900 font-black px-4 py-2 rounded-lg text-xs outline-none focus:border-indigo-600 shadow-sm disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed" value={selectedClasseId} onChange={e => setSelectedClasseId(e.target.value)}>
@@ -529,7 +541,7 @@ export default function Emploi() {
                   <MdAutoAwesome size={16} /> Générer Classe
                 </button>
 
-                {/* 🔔 NOTIFICATION BELL DROPDOWN */}
+                {/* NOTIFICATION BELL DROPDOWN */}
                 <div className="relative ml-2">
                   <button
                     onClick={() => setShowNotifications(!showNotifications)}
@@ -573,7 +585,7 @@ export default function Emploi() {
                   )}
                 </div>
 
-                {/* VIDER DROPDOWN */}
+                {/* CLEAR OPTIONS DROPDOWN */}
                 <div className="relative ml-1">
                   <button
                     onClick={() => setShowClearOptions(!showClearOptions)}

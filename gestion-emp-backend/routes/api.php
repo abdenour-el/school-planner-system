@@ -7,6 +7,8 @@ use App\Http\Controllers\MatiereController;
 use App\Http\Controllers\EnseignantController;
 use App\Http\Controllers\SeanceController;
 use App\Http\Controllers\AutoGeneratorController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\UserController;
 
 /*
 |--------------------------------------------------------------------------
@@ -32,3 +34,21 @@ Route::post('/seances/reset', [SeanceController::class, 'resetAll']); // Beddeln
 // 4. Routes pour les Séances individuelles (CRUD classique)
 // apiResource crée automatiquement index, store, show, update, destroy (Mss7na t-Tikrar)
 Route::apiResource('seances', SeanceController::class);
+
+// ==========================================
+// PUBLIC ROUTES (No token required)
+// ==========================================
+Route::post('/login', [AuthController::class, 'login']);
+
+
+// ==========================================
+// PROTECTED ROUTES (Require valid token)
+// ==========================================
+Route::middleware('auth:sanctum')->group(function () {
+    
+    // User logout route
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/users', [UserController::class, 'index']);
+    Route::post('/users', [UserController::class, 'store']);
+    Route::delete('/users/{id}', [UserController::class, 'destroy']);
+});
