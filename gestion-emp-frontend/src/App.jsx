@@ -1,33 +1,25 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
-import Login from './pages/Login'; //  Make sure the path to Login is correct!
 import Dashboard from './pages/Dashboard';
 import Classes from './pages/Classes';
-// import Matieres from './pages/Matieres';
 import Enseignants from './pages/Enseignants';
 import Emploi from './pages/Emploi';
-import Utilisateurs from './pages/Utilisateurs';
+// Uncomment the line below if you still want to use the Utilisateurs page
+// import Utilisateurs from './pages/Utilisateurs'; 
 
 // ==========================================
-// PROTECTED LAYOUT (The Bouncer & Wrapper)
+// MAIN LAYOUT
 // ==========================================
-// This component wraps all private pages. 
-// It checks for a token, and if valid, it shows the Sidebar and the requested page (<Outlet />).
-const ProtectedLayout = () => {
-  // 1. Check if the user has a token in localStorage
-  const token = localStorage.getItem('auth_token');
-
-  // 2. If no token, kick them back to the login page immediately
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-
-  // 3. If token exists, render the standard layout (Sidebar + Content Area)
+// This is the main wrapper that holds the Sidebar and the Content Area.
+// Authentication has been removed, so this layout is public.
+const MainLayout = () => {
   return (
-    <div className="flex min-h-screen bg-gray-100 font-sans">
+    <div className="flex h-screen w-full bg-gray-50 font-sans overflow-hidden">
+      {/* 1. Sidebar is always positioned on the left */}
       <Sidebar />
-      <div className="flex-1 p-8 h-screen overflow-y-auto">
-        {/* <Outlet /> is a placeholder where the specific page (Dashboard, Classes, etc.) will render */}
+      
+      {/* 2. Main content area for the pages (Dashboard, Classes, etc.) */}
+      <div className="flex-1 h-screen overflow-y-auto relative">
         <Outlet />
       </div>
     </div>
@@ -43,29 +35,24 @@ export default function App() {
       <Routes>
         
         {/* -------------------------------------- */}
-        {/* 1. PUBLIC ROUTE (No Sidebar, No Token needed) */}
+        {/* MAIN ROUTES (Wrapped inside MainLayout)  */}
         {/* -------------------------------------- */}
-        <Route path="/login" element={<Login />} />
-
-        {/* -------------------------------------- */}
-        {/* 2. PROTECTED ROUTES (Sidebar + Token required) */}
-        {/* -------------------------------------- */}
-        {/* Any route placed inside this wrapper will require authentication */}
-        <Route element={<ProtectedLayout />}>
+        <Route element={<MainLayout />}>
           <Route path="/" element={<Dashboard />} />
+          
           <Route path="/classes" element={<Classes />} />
-          {/* Note: In your previous code, /matieres was pointing to <Classes />. 
-              Make sure to change it to <Matieres /> if you have a separate component! */}
           <Route path="/matieres" element={<Classes />} /> 
+          
           <Route path="/enseignants" element={<Enseignants />} />
           <Route path="/emploi" element={<Emploi />} />
-          <Route path="/utilisateurs" element={<Utilisateurs />} />
+          
+          {/* <Route path="/utilisateurs" element={<Utilisateurs />} /> */}
         </Route>
 
         {/* -------------------------------------- */}
-        {/* 3. FALLBACK ROUTE (Catch-all for wrong URLs) */}
+        {/* FALLBACK ROUTE (Security / Catch-all)  */}
         {/* -------------------------------------- */}
-        {/* If user types a URL that doesn't exist, redirect them to Dashboard (which will then check for login) */}
+        {/* Redirect unknown routes or /login back to the Dashboard */}
         <Route path="*" element={<Navigate to="/" replace />} />
 
       </Routes>

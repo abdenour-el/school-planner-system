@@ -453,7 +453,8 @@ class AutoGeneratorController extends Controller
                                     $dureeA_Prendre = 2;
                                 } else {
                                     $dureeA_Prendre = ($maxPossible >= 2 ) ? 2 :1;
-                                }   
+                                } 
+
                             } elseif ($isIslamic) {
                                 $reste = $suiviMatiere[$mId]['reste'];
 
@@ -477,7 +478,7 @@ class AutoGeneratorController extends Controller
                             }
 
                             $heureFin = date('H:i', strtotime($slot['debut'] . " +{$dureeA_Prendre} hour"));
-                            // SAFETY GUARD: Prevent overlapping the 13:00 and 19:00 limits
+                            
                             if ($slot['debut'] < '13:00' && $heureFin > '13:00') continue;
                             if ($slot['debut'] >= '16:00' && $heureFin > '19:00') continue;
 
@@ -496,9 +497,10 @@ class AutoGeneratorController extends Controller
                             $suiviMatiere[$mId]['reste'] -= $dureeA_Prendre;
                             $progress = true;
                             break; 
+                        }
+                        if ($placed ?? false) break;
                     }
                 }
-            }
                 if (!$progress) break;
                 $attempts++;
             }
@@ -567,6 +569,9 @@ class AutoGeneratorController extends Controller
         }
 
         $logs = [];
+        // Track failures to build a precise error message
+        $failedClasses = [];
+        $hasErrors = false;
 
         try {
             foreach ($classes as $classe) {
@@ -582,12 +587,23 @@ class AutoGeneratorController extends Controller
                     $logs[] = "✔ {$classe->nom_classe}";
                 } else {
                     DB::rollBack();
+                    $hasErrors = true;
                     $logs[] = "❌ {$classe->nom_classe} → " . $result['message'];
+                    // Add the exact class and specific error to the failure list
+                    $failedClasses[] = "⛔ {$classe->nom_classe} : " . $result['message'];
                 }
             }
 
+            // Return a 422 Error code if any class failed, triggering the frontend error toast
+            if ($hasErrors) {
+                return response()->json([
+                    'message' => "Génération incomplète ! Les classes suivantes ont échoué :\n\n" . implode("\n\n", $failedClasses),
+                    'details' => $logs
+                ], 422);
+            }
+
             return response()->json([
-                'message' => "Génération terminée.",
+                'message' => "Génération terminée avec succès.",
                 'details' => $logs
             ]);
 

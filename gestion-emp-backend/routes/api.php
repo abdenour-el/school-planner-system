@@ -7,48 +7,40 @@ use App\Http\Controllers\MatiereController;
 use App\Http\Controllers\EnseignantController;
 use App\Http\Controllers\SeanceController;
 use App\Http\Controllers\AutoGeneratorController;
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\UserController;
 
 /*
 |--------------------------------------------------------------------------
 | API Routes
 |--------------------------------------------------------------------------
+|
+| Here is where you can register API routes for your application.
+|
 */
 
-// 1. Routes de base (Ressources CRUD)
+// ==========================================
+// 1. BASIC CRUD RESOURCES
+// ==========================================
+// Automatically generates index, store, show, update, and destroy routes
 Route::apiResource('classes', ClasseController::class);
 Route::apiResource('matieres', MatiereController::class);
 Route::apiResource('enseignants', EnseignantController::class);
 
-// 2. Routes de Génération Automatique
+// ==========================================
+// 2. AUTO-GENERATOR ROUTES
+// ==========================================
 Route::post('/generate-emploi', [AutoGeneratorController::class, 'generate']);
 Route::post('/generate-all', [AutoGeneratorController::class, 'generateAll']);
 
-// 3. Routes de Suppression Globale (Les nouveaux boutons "Vider")
-// 🚨 Mettna les routes custom AVANT 'apiResource' bash maywqe3sh conflit d-les URLs
+// ==========================================
+// 3. CUSTOM SEANCE ROUTES (CLEAR & RESET)
+// ==========================================
+// IMPORTANT: Custom endpoints must be defined BEFORE the apiResource 
+// to prevent route parameter conflicts with {seance}
 Route::delete('/seances/clear-classe/{classe_id}', [SeanceController::class, 'clearClasse']);
 Route::post('/seances/clear-niveau', [SeanceController::class, 'clearNiveau']);
-Route::post('/seances/reset', [SeanceController::class, 'resetAll']); // Beddelnaha l-/seances/reset bash t-khdem m3a l-Frontend
+Route::post('/seances/reset', [AutoGeneratorController::class, 'resetAll']); 
 
-// 4. Routes pour les Séances individuelles (CRUD classique)
-// apiResource crée automatiquement index, store, show, update, destroy (Mss7na t-Tikrar)
+// ==========================================
+// 4. SEANCES CRUD
+// ==========================================
 Route::apiResource('seances', SeanceController::class);
-
-// ==========================================
-// PUBLIC ROUTES (No token required)
-// ==========================================
-Route::post('/login', [AuthController::class, 'login']);
-
-
-// ==========================================
-// PROTECTED ROUTES (Require valid token)
-// ==========================================
-Route::middleware('auth:sanctum')->group(function () {
-    
-    // User logout route
-    Route::post('/logout', [AuthController::class, 'logout']);
-    Route::get('/users', [UserController::class, 'index']);
-    Route::post('/users', [UserController::class, 'store']);
-    Route::delete('/users/{id}', [UserController::class, 'destroy']);
-});

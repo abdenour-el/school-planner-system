@@ -1,13 +1,11 @@
 import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { BsHouseDoor, BsGear, BsPeople, BsCalendar3, BsBuildings, BsChevronLeft, BsChevronRight, BsBoxArrowRight } from "react-icons/bs";
 import { FiUser } from "react-icons/fi"; // 👈 Zidna l-Icon dyal Utilisateur
-import axiosClient from '../axiosClient';
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(true);
   const location = useLocation();
-  const navigate = useNavigate();
 
   // =========================================================================
   // NAVIGATION MENU DATA (L-FOQ)
@@ -21,19 +19,6 @@ export default function Sidebar() {
   // =========================================================================
   // LOGOUT HANDLER
   // =========================================================================
-  const handleLogout = async () => {
-    if (!window.confirm("Voulez-vous vraiment vous déconnecter ?")) return;
-
-    try {
-        await axiosClient.post('/logout');
-    } catch (error) {
-        console.error("Logout error", error);
-    } finally {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user_name');
-        navigate('/login');
-    }
-  };
 
   return (
     <aside 
@@ -113,48 +98,7 @@ export default function Sidebar() {
       {/* ===================================================================== */}
       {/* 5. FOOTER (UTILISATEURS + LOGOUT)                                     */}
       {/* ===================================================================== */}
-      <div className="p-4 border-t border-gray-100 mt-auto flex flex-col gap-2">
-        
-        {/* BOUTON UTILISATEURS (ADMIN) */}
-        <Link 
-          to="/utilisateurs"
-          title={!isOpen ? "Utilisateurs" : ""}
-          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all shadow-sm cursor-pointer ${
-            location.pathname === '/utilisateurs'
-              ? 'bg-gray-800 text-white' 
-              : 'bg-gray-50 text-gray-700 hover:bg-gray-200'
-          } ${isOpen ? 'justify-start' : 'justify-center'}`}
-        >
-          <span className="text-xl">
-            <FiUser />
-          </span>
-          {isOpen && (
-            <span className="font-black text-xs uppercase tracking-widest whitespace-nowrap">
-              Utilisateurs
-            </span>
-          )}
-        </Link>
-
-        {/* BOUTON DECONNEXION */}
-        <button 
-          onClick={handleLogout}
-          title={!isOpen ? "Déconnexion" : ""}
-          className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all shadow-sm cursor-pointer ${
-            isOpen 
-              ? 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white justify-start' 
-              : 'bg-red-50 text-red-600 hover:bg-red-600 hover:text-white justify-center'
-          }`}
-        >
-          <span className="text-xl">
-            <BsBoxArrowRight />
-          </span>
-          {isOpen && (
-            <span className="font-black text-xs uppercase tracking-widest whitespace-nowrap">
-              Déconnexion
-            </span>
-          )}
-        </button>
-      </div>
+      
 
     </aside>
   );

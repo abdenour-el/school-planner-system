@@ -258,7 +258,12 @@ export default function Emploi() {
       notify(res.data.message, 'success');
       fetchEmploi();
     } catch (err) {
-      notify(err.response?.data?.message || "Erreur lors de la génération.", 'error');
+      // 🔥 FIX: Now properly checks for the 422 error from the backend and triggers the 'error' (red) notification type.
+      const isValidationOrLogicError = err.response?.status === 422;
+      notify(
+        err.response?.data?.message || "Erreur lors de la génération.", 
+        isValidationOrLogicError ? 'error' : 'error'
+      );
     } finally {
       setLoadingBulk(false);
       setBulkProgress('');
@@ -707,9 +712,26 @@ export default function Emploi() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-500 uppercase">Enseignant</label>
-                  <select required disabled={!formData.matiere_id} className="w-full border-2 p-3 rounded-xl font-black text-xs uppercase text-indigo-900 focus:border-indigo-600 disabled:opacity-50 disabled:bg-gray-100 cursor-pointer disabled:cursor-not-allowed" value={formData.enseignant_id} onChange={(e) => setFormData({...formData, enseignant_id: e.target.value})}>
+                  {/* 🔥 FIXED TEACHER SELECT 🔥 */}
+                  <select 
+                    required 
+                    disabled={!formData.matiere_id} 
+                    className="w-full border-2 p-3 rounded-xl font-black text-xs uppercase text-indigo-900 focus:border-indigo-600 disabled:opacity-50 disabled:bg-gray-100 cursor-pointer disabled:cursor-not-allowed" 
+                    value={formData.enseignant_id} 
+                    onChange={(e) => setFormData({...formData, enseignant_id: e.target.value})}
+                  >
                     <option value="">-- Choisir --</option>
-                    {enseignants.filter(p => !formData.matiere_id || p.matiere_id === parseInt(formData.matiere_id)).filter(p => !selectedNiveau || p.niveaux?.includes(selectedNiveau)).map(p => <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>)}
+                    {enseignants
+                      .filter(p => !formData.matiere_id || Number(p.matiere_id) === Number(formData.matiere_id))
+                      .filter(p => {
+                        const currentNiv = selectedClasse ? selectedClasse.niveau : selectedNiveau;
+                        if (!currentNiv || !p.niveaux || p.niveaux.length === 0) return true;
+                        return p.niveaux.includes(String(currentNiv)) || p.niveaux.includes(Number(currentNiv));
+                      })
+                      .map(p => (
+                        <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>
+                      ))
+                    }
                   </select>
                 </div>
               </div>
