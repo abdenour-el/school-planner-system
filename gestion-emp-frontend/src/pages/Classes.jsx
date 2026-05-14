@@ -12,9 +12,8 @@ export default function Configuration() {
   const location = useLocation();
 
   // =========================================================================
-  // 1. DERIVED STATE (L-7el dyal l-Erreur l-wla)
+  // 1. DERIVED STATE
   // =========================================================================
-  // B blast ma n-diro useState w useEffect, kan-qraw l-Lien nishaan.
   const activeTab = location.pathname.includes('/matieres') ? 'matieres' : 'classes';
 
   // =========================================================================
@@ -37,7 +36,7 @@ export default function Configuration() {
   const [formData, setFormData] = useState({});
 
   // =========================================================================
-  // 3. DATA FETCHING (L-7el dyal l-Erreur t-taniya b useCallback)
+  // 3. DATA FETCHING 
   // =========================================================================
   const loadData = useCallback(async () => {
     try {
@@ -53,13 +52,12 @@ export default function Configuration() {
     } finally {
       setLoading(false);
     }
-  }, []); // 👈 useCallback kat-7mi la fonction mn les re-renders
+  }, []); 
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Vider la recherche mli kay-t-beddel l-onglet
   useEffect(() => {
     setSearchQuery('');
   }, [activeTab]);
@@ -89,14 +87,20 @@ export default function Configuration() {
   const openAddMatiere = () => {
     setModalType('matiere'); 
     setEditingId(null);
-    setFormData({ nom_matiere: '', volume_horaire: 2 });
+    // Added 'type' default value
+    setFormData({ nom_matiere: '', type: 'assasiya', volume_horaire: 2 });
     setIsModalOpen(true);
   };
 
   const openEditMatiere = (mat) => {
     setModalType('matiere'); 
     setEditingId(mat.id);
-    setFormData({ nom_matiere: mat.nom_matiere, volume_horaire: mat.volume_horaire });
+    // Include 'type' when editing
+    setFormData({ 
+        nom_matiere: mat.nom_matiere, 
+        type: mat.type || 'assasiya', 
+        volume_horaire: mat.volume_horaire 
+    });
     setIsModalOpen(true);
   };
 
@@ -148,20 +152,15 @@ export default function Configuration() {
   // 8. RENDERERS & HELPERS (FILTERING LOGIC)
   // =========================================================================
   
-  // Filter and group classes based on search query
   const filteredClasses = classes.filter(c => c.nom_classe.toLowerCase().includes(searchQuery.toLowerCase()));
   const classesGrouped = [...new Set(filteredClasses.map(c => c.niveau))].sort((a,b) => a - b).map(niv => ({
     niveau: niv, 
     liste: filteredClasses.filter(c => c.niveau === niv)
   }));
 
-  // Filter subjects based on search query
   const filteredMatieres = matieres.filter(m => m.nom_matiere.toLowerCase().includes(searchQuery.toLowerCase()));
-
-  // Calculate total volume horaire
   const totalVolumeHoraire = matieres.reduce((sum, m) => sum + m.volume_horaire, 0);
 
-  // Loading State
   if (loading) {
     return (
       <div className="p-6 text-center text-indigo-600 font-black animate-pulse mt-20 uppercase tracking-widest">
@@ -207,8 +206,6 @@ export default function Configuration() {
 
         {/* Separator, Search and Add Button */}
         <div className="flex flex-col md:flex-row justify-between items-center pt-5 border-t border-gray-100 gap-4">
-          
-          {/* Universal Search Bar */}
           <div className="relative w-full md:w-72">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
               <FiSearch />
@@ -241,8 +238,6 @@ export default function Configuration() {
           ) : (
             classesGrouped.map(groupe => (
               <div key={groupe.niveau} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                
-                {/* Level Header (Accordion Toggle) */}
                 <div onClick={() => toggleGroup(groupe.niveau)} className="bg-white hover:bg-gray-50 border-b border-gray-100 text-gray-800 p-5 cursor-pointer flex justify-between items-center select-none transition-colors group">
                   <div className="flex items-center gap-4">
                     <span className="text-indigo-600 bg-indigo-50 p-2 rounded-xl group-hover:bg-indigo-100 transition-colors">
@@ -254,8 +249,6 @@ export default function Configuration() {
                     {groupe.liste.length} Classe(s)
                   </span>
                 </div>
-                
-                {/* Classes Grid */}
                 {expandedGroups[groupe.niveau] && (
                   <div className="p-5 bg-gray-50/50">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -272,20 +265,10 @@ export default function Configuration() {
                             </div>
                           </span>
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={(e) => {
-                              e.stopPropagation();
-                              openEditClasse(cls);
-                            }}
-                              className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-colors cursor-pointer" title="Modifier"
-                            >
+                            <button onClick={(e) => { e.stopPropagation(); openEditClasse(cls); }} className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white transition-colors cursor-pointer" title="Modifier">
                               <FiEdit size={16} />
                             </button>
-                            <button onClick={(e) => { 
-                              e.stopPropagation();
-                              handleDelete(cls.id, 'classe')
-                            }}
-                            className="w-8 h-8 flex items-center justify-center bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-colors cursor-pointer" title="Supprimer"
-                            >
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(cls.id, 'classe'); }} className="w-8 h-8 flex items-center justify-center bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-colors cursor-pointer" title="Supprimer">
                               <FiTrash2 size={16} />
                             </button>
                           </div>
@@ -326,7 +309,13 @@ export default function Configuration() {
                         <span className="text-orange-500 bg-orange-50 p-2 rounded-lg">
                           <FaBook size={18} />
                         </span>
-                        {mat.nom_matiere}
+                        <div className="flex flex-col">
+                          <span>{mat.nom_matiere}</span>
+                          {/* Highlight if it is Assasiya or Secondaire */}
+                          <span className={`text-[9px] font-bold mt-0.5 tracking-widest ${mat.type === 'assasiya' ? 'text-indigo-500' : 'text-gray-400'}`}>
+                            {mat.type === 'assasiya' ? 'PRINCIPALE (ASSASIYA)' : 'SECONDAIRE'}
+                          </span>
+                        </div>
                       </span>
                     </td>
                     <td className="py-4 px-6 text-center">
@@ -336,14 +325,10 @@ export default function Configuration() {
                     </td>
                     <td className="py-4 px-6 flex justify-end gap-2">
                       <button onClick={() => openEditMatiere(mat)} className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white font-black text-[10px] uppercase tracking-widest transition-colors cursor-pointer shadow-sm">
-                        <div className='flex items-center gap-2'>
-                          <FiEdit size={14} /> Modifier
-                        </div>
+                        <div className='flex items-center gap-2'><FiEdit size={14} /> Modifier</div>
                       </button>
                       <button onClick={() => handleDelete(mat.id, 'matiere')} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white font-black text-[10px] uppercase tracking-widest transition-colors cursor-pointer shadow-sm">
-                        <div className='flex items-center gap-2'>
-                          <FiTrash2 size={14} /> Supprimer
-                        </div>
+                        <div className='flex items-center gap-2'><FiTrash2 size={14} /> Supprimer</div>
                       </button>
                     </td>
                   </tr>
@@ -352,7 +337,6 @@ export default function Configuration() {
             </tbody>
           </table>
           
-          {/* Total Hours Counter */}
           <div className="p-5 bg-gray-50 flex justify-between items-center border-t border-gray-100">
             <span className="font-black text-xs uppercase tracking-widest text-gray-500">Total des Heures du Programme :</span>
             <span className={`font-black text-lg px-4 py-1 rounded-xl shadow-sm ${totalVolumeHoraire === 32 ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-100'}`}>
@@ -371,7 +355,6 @@ export default function Configuration() {
             </h2>
             <form onSubmit={handleSubmit} className="space-y-5">
               
-              {/* Form Fields for Classe */}
               {modalType === 'classe' ? (
                 <>
                   <div className="space-y-1">
@@ -400,7 +383,6 @@ export default function Configuration() {
                   </div>
                 </>
               ) : (
-                /* Form Fields for Matière */
                 <>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nom de la Matière</label>
@@ -413,6 +395,22 @@ export default function Configuration() {
                       placeholder="Ex: Mathématiques" 
                     />
                   </div>
+                  
+                  {/* ====== NEW FIELD: TYPE DE MATIERE ====== */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Type de la Matière</label>
+                    <select
+                      required
+                      className="w-full border-2 border-gray-200 p-3 rounded-xl focus:border-orange-500 outline-none font-bold text-gray-900 transition-colors"
+                      value={formData.type || 'assasiya'}
+                      onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    >
+                      <option value="assasiya">Matière Principale (Assasiya) - Max 6h/j</option>
+                      <option value="secondaire">Matière Secondaire - Max 7h/j</option>
+                    </select>
+                  </div>
+                  {/* ======================================== */}
+
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Volume Horaire (Heures/Semaine)</label>
                     <input 
@@ -429,7 +427,6 @@ export default function Configuration() {
                 </>
               )}
 
-              {/* Form Action Buttons */}
               <div className="flex justify-end gap-3 pt-6 border-t border-gray-100 mt-6">
                 <button 
                   type="button" 

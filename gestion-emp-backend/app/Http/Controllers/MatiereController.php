@@ -20,9 +20,10 @@ class MatiereController extends Controller
     // =========================================================================
     public function store(Request $request)
     {
-        // Validate incoming data (Volume between 1 and 20 to match the frontend)
+        // Validate incoming data (Added 'type' to distinguish primary/secondary subjects)
         $validated = $request->validate([
             'nom_matiere' => 'required|string|max:255',
+            'type' => 'required|string|in:assasiya,secondaire', // Validation for the new field
             'volume_horaire' => 'required|integer|min:1|max:20', 
         ]);
 
@@ -36,13 +37,15 @@ class MatiereController extends Controller
     }
 
     // =========================================================================
-    // UPDATE AN EXISTING SUBJECT (THE MISSING METHOD 🔥)
+    // UPDATE AN EXISTING SUBJECT
     // =========================================================================
-    public function update(Request $request, $id)
+    // Note: Added 'int' before $id to fix any Intelephense warning!
+    public function update(Request $request, int $id)
     {
         // Validate incoming data
         $validated = $request->validate([
             'nom_matiere' => 'required|string|max:255',
+            'type' => 'required|string|in:assasiya,secondaire', // Validation for the new field
             'volume_horaire' => 'required|integer|min:1|max:20',
         ]);
 
@@ -59,7 +62,8 @@ class MatiereController extends Controller
     // =========================================================================
     // DELETE A SUBJECT
     // =========================================================================
-    public function destroy($id)
+    // Note: Added 'int' before $id to fix any Intelephense warning!
+    public function destroy(int $id)
     {
         // Find the subject by ID and delete it
         Matiere::findOrFail($id)->delete();

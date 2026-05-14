@@ -7,29 +7,31 @@ import axiosClient from '../axiosClient';
 
 export default function Enseignants() {
   // =========================================================================
-  // DATA STATES
+  // 1. DATA STATES
   // =========================================================================
   const [enseignants, setEnseignants] = useState([]);
   const [matieres, setMatieres] = useState([]);
+  const [classes, setClasses] = useState([]); // NEW: State to hold all classes
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   
   // =========================================================================
-  // VIEW & GROUPING STATES
+  // 2. VIEW & GROUPING STATES
   // =========================================================================
   const [expandedGroups, setExpandedGroups] = useState({});
   
   // =========================================================================
-  // CRUD MODAL STATES
+  // 3. CRUD MODAL STATES
   // =========================================================================
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  // NEW: Updated formData to match the new Backend logic (max_heures & classes_ids)
   const [formData, setFormData] = useState({ 
-    nom: '', prenom: '', matiere_id: '', nombre_groupes: 1, niveaux: [] 
+    nom: '', prenom: '', matiere_id: '', max_heures: 24, classes_ids: [] 
   });
 
   // =========================================================================
-  // SCHEDULE (EMPLOI) MODAL STATES
+  // 4. SCHEDULE (EMPLOI) MODAL STATES
   // =========================================================================
   const [showEmploiModal, setShowEmploiModal] = useState(false);
   const [currentProf, setCurrentProf] = useState(null);
@@ -37,7 +39,7 @@ export default function Enseignants() {
   const [loadingEmploi, setLoadingEmploi] = useState(false);
 
   // =========================================================================
-  // DOWNLOAD ALL FEATURE STATES
+  // 5. DOWNLOAD ALL FEATURE STATES
   // =========================================================================
   const [allSeances, setAllSeances] = useState([]);
   const [isPreparingPDF, setIsPreparingPDF] = useState(false);
@@ -47,7 +49,7 @@ export default function Enseignants() {
   const jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
   
   // =========================================================================
-  // PRINT / DOWNLOAD SETUP
+  // 6. PRINT / DOWNLOAD SETUP
   // =========================================================================
   const handlePrintSingle = useReactToPrint({
     contentRef: componentRef,
@@ -79,16 +81,19 @@ export default function Enseignants() {
   };
 
   // =========================================================================
-  // DATA FETCHING (CRUD)
+  // 7. DATA FETCHING (CRUD)
   // =========================================================================
   const loadData = async () => {
     try {
-      const [resEns, resMat] = await Promise.all([
+      // Fetch teachers, subjects AND classes at once
+      const [resEns, resMat, resCls] = await Promise.all([
         axiosClient.get('/enseignants'),
-        axiosClient.get('/matieres')
+        axiosClient.get('/matieres'),
+        axiosClient.get('/classes') // NEW
       ]);
       setEnseignants(resEns.data);
       setMatieres(resMat.data);
+      setClasses(resCls.data); // NEW
       
       const initialExpanded = {};
       resMat.data.forEach(m => { initialExpanded[m.id] = true; });
@@ -108,15 +113,19 @@ export default function Enseignants() {
   }, []);
 
   // =========================================================================
-  // UI HANDLERS
+  // 8. UI HANDLERS & HELPERS
   // =========================================================================
   const toggleGroup = (groupId) => setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
 
-  const handleNiveauChange = (niv) => {
-    const val = niv.toString();
+  // NEW: Handle checking/unchecking specific classes
+  const handleClasseChange = (classId) => {
     setFormData(prev => {
-      if (prev.niveaux.includes(val)) return { ...prev, niveaux: prev.niveaux.filter(n => n !== val) };
-      return { ...prev, niveaux: [...prev.niveaux, val] };
+      if (prev.classes_ids.includes(classId)) {
+        // If already selected, remove it
+        return { ...prev, classes_ids: prev.classes_ids.filter(id => id !== classId) };
+      }
+      // If not selected, add it
+      return { ...prev, classes_ids: [...prev.classes_ids, classId] };
     });
   };
 
@@ -126,8 +135,8 @@ export default function Enseignants() {
       nom: '', 
       prenom: '', 
       matiere_id: defaultMatiereId, 
-      nombre_groupes: 1, 
-      niveaux: [] 
+      max_heures: 24, // Default hours
+      classes_ids: [] // Empty classes array
     });
     setIsModalOpen(true);
   };
@@ -135,17 +144,20 @@ export default function Enseignants() {
   const openEditModal = (prof) => {
     setEditingId(prof.id);
     setFormData({
-      nom: prof.nom, prenom: prof.prenom, matiere_id: prof.matiere_id || '',
-      nombre_groupes: prof.nombre_groupes,
-      niveaux: prof.niveaux ? prof.niveaux.map(String) : [] 
+      nom: prof.nom, 
+      prenom: prof.prenom, 
+      matiere_id: prof.matiere_id || '',
+      max_heures: prof.max_heures || 24,
+      // Extract class IDs from the pivot relation
+      classes_ids: prof.classes ? prof.classes.map(c => c.id) : [] 
     });
     setIsModalOpen(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (formData.niveaux.length === 0) { 
-      toast.error("⚠️ Veuillez sélectionner au moins un niveau d'enseignement !"); 
+    if (formData.classes_ids.length === 0) { 
+      toast.error("⚠️ Veuillez sélectionner au moins une classe !"); 
       return; 
     }
     try {
@@ -159,8 +171,8 @@ export default function Enseignants() {
       setIsModalOpen(false); 
       setEditingId(null); 
       loadData(); 
-    } catch { 
-      toast.error("Erreur lors de l'enregistrement du professeur."); 
+    } catch (error) { 
+        toast.error(error.response?.data?.message || "Erreur lors de l'enregistrement du professeur."); 
     }
   };
 
@@ -201,6 +213,13 @@ export default function Enseignants() {
     const hFin = parseInt(fin.substring(0, 2));
     return { gridColumn: `${hDebut - 16 + 1} / span ${hFin - hDebut}` };
   };
+
+  // Group classes by level for the Checkbox UI in the Modal
+  const classesByNiveau = classes.reduce((acc, cls) => {
+    if (!acc[cls.niveau]) acc[cls.niveau] = [];
+    acc[cls.niveau].push(cls);
+    return acc;
+  }, {});
 
   const renderTable = (profData, seancesData) => {
     const totalHours = seancesData.reduce((sum, s) => {
@@ -320,6 +339,9 @@ export default function Enseignants() {
       );
     };
 
+    // Extract unique levels taught by the teacher from their assigned classes
+    const uniqueNiveaux = prof.classes ? [...new Set(prof.classes.map(c => c.niveau))].sort((a,b) => a-b) : [];
+
     return (
       <tr key={prof.id} className="hover:bg-indigo-50/40 border-b border-gray-100 transition-colors bg-white">
         <td className="py-4 px-4 font-black text-gray-900 w-[20%]">
@@ -337,7 +359,7 @@ export default function Enseignants() {
         
         <td className="py-4 px-4 text-center w-[15%]">
           <div className="flex justify-center gap-1 flex-wrap">
-            {prof.niveaux && prof.niveaux.map((niv, idx) => (
+            {uniqueNiveaux.map((niv, idx) => (
               <span key={idx} className="bg-gray-100 text-gray-600 border border-gray-200 text-[9px] px-2 py-1 rounded-md font-black shadow-sm">N{niv}</span>
             ))}
           </div>
@@ -345,8 +367,8 @@ export default function Enseignants() {
 
         <td className="py-4 px-4 w-[25%]">
           <div className="flex flex-wrap gap-1">
-            {prof.classes_assignees && prof.classes_assignees.length > 0 ? (
-              prof.classes_assignees.map((cls, idx) => (
+            {prof.classes && prof.classes.length > 0 ? (
+              prof.classes.map((cls, idx) => (
                 <span key={idx} className="bg-indigo-50 border border-indigo-100 text-indigo-700 text-[9px] px-2 py-1 rounded font-black uppercase shadow-sm">
                   {cls.nom_classe}
                 </span>
@@ -462,7 +484,6 @@ export default function Enseignants() {
         {enseignantsGroupes.map(groupe => (
           <div key={groupe.matiere.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             
-            {/* Group Header */}
             <div
              onClick={() => toggleGroup(groupe.matiere.id)} 
              className="bg-white hover:bg-gray-50 border-b border-gray-100 text-gray-800 p-5 flex justify-between items-center transition-colors select-none cursor-pointer group"
@@ -494,7 +515,6 @@ export default function Enseignants() {
               </div>
             </div>
             
-            {/* Group Content (Teachers Table) */}
             {expandedGroups[groupe.matiere.id] && (
               <div className="overflow-x-auto bg-gray-50/50 p-4">
                 <table className="w-full text-left border-collapse bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -517,7 +537,6 @@ export default function Enseignants() {
           </div>
         ))}
 
-        {/* Empty States */}
         {search && enseignantsGroupes.length === 0 ? (
           <div className="text-center py-20 text-gray-400 font-black text-xl uppercase tracking-widest bg-white rounded-2xl border border-gray-100 border-dashed">
             Aucun résultat trouvé pour "{search}"
@@ -529,7 +548,6 @@ export default function Enseignants() {
         )}
       </div>
 
-      {/* 3. HIDDEN CONTAINER TO PRINT ALL TEACHERS */}
       <div className="hidden">
         <div ref={allComponentRef} className="w-full bg-white print:m-0 print:p-0">
           {enseignants.map((prof, index) => {
@@ -549,7 +567,7 @@ export default function Enseignants() {
       {/* 4. CRUD MODAL (ADD / EDIT) */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 no-print">
-          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-lg border-t-8 border-indigo-600">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-2xl border-t-8 border-indigo-600 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-black mb-6 uppercase tracking-tighter text-gray-800">
               {editingId ? "Modifier Professeur" : "Ajouter Professeur"}
             </h2>
@@ -574,21 +592,41 @@ export default function Enseignants() {
                     {matieres.map(mat => <option key={mat.id} value={mat.id}>{mat.nom_matiere}</option>)}
                   </select>
                 </div>
+                {/* NEW: Max Heures instead of Nombre Groupes Max */}
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nombre Groupes Max</label>
-                  <input type="number" min="1" required className="w-full border-2 border-gray-200 p-3 rounded-xl focus:border-indigo-600 font-black text-gray-900 outline-none transition-colors" value={formData.nombre_groupes} onChange={(e) => setFormData({...formData, nombre_groupes: parseInt(e.target.value)})} />
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Max Heures / Semaine</label>
+                  <input type="number" min="1" required className="w-full border-2 border-gray-200 p-3 rounded-xl focus:border-indigo-600 font-black text-gray-900 outline-none transition-colors" value={formData.max_heures} onChange={(e) => setFormData({...formData, max_heures: parseInt(e.target.value)})} />
                 </div>
               </div>
               
-              <div className="space-y-2 pt-2 bg-gray-50 p-5 rounded-2xl border border-gray-100">
-                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-3">Niveaux Enseignés</label>
-                <div className="flex flex-wrap gap-2">
-                  {[1, 2, 3, 4, 5, 6].map(niv => (
-                    <label key={niv} className={`flex items-center gap-2 font-black text-xs px-4 py-2 rounded-xl border-2 cursor-pointer transition-all ${formData.niveaux.includes(niv.toString()) ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
-                      <input type="checkbox" className="hidden" checked={formData.niveaux.includes(niv.toString())} onChange={() => handleNiveauChange(niv)} /> NIVEAU {niv}
-                    </label>
-                  ))}
-                </div>
+              {/* NEW: Explicit Classes Selection grouped by Niveau */}
+              <div className="space-y-3 pt-2 bg-gray-50 p-5 rounded-2xl border border-gray-100">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-2">
+                  Classes Assignées (Cochez les classes exactes)
+                </label>
+                
+                {Object.keys(classesByNiveau).length === 0 ? (
+                  <p className="text-xs text-red-500 font-bold italic">Aucune classe n'est configurée dans le système.</p>
+                ) : (
+                  Object.entries(classesByNiveau).sort(([a], [b]) => a - b).map(([niveau, listeClasses]) => (
+                    <div key={niveau} className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+                      <h4 className="text-xs font-black text-indigo-600 uppercase mb-2 tracking-widest">Niveau {niveau}</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {listeClasses.map(cls => (
+                          <label key={cls.id} className={`flex items-center gap-2 font-black text-xs px-3 py-1.5 rounded-lg border-2 cursor-pointer transition-all ${formData.classes_ids.includes(cls.id) ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
+                            <input 
+                              type="checkbox" 
+                              className="hidden" 
+                              checked={formData.classes_ids.includes(cls.id)} 
+                              onChange={() => handleClasseChange(cls.id)} 
+                            /> 
+                            {cls.nom_classe}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
               
               <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
