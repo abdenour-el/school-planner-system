@@ -13,7 +13,7 @@ use Throwable;
 class AutoGeneratorController extends Controller
 {
     private $forcedSplitClasses = [];
-    private $conflictTracker = []; // L-Kounash d-L-Mokhabarat li kay-sjel shkoun khneq shkoun!
+    private $conflictTracker = []; 
 
     public function resetAll()
     {
@@ -33,6 +33,23 @@ class AutoGeneratorController extends Controller
             $this->forcedSplitClasses = []; 
 
             DB::beginTransaction();
+
+            // 🔥 RADAR PRE-CHECK
+            $matieres = Matiere::all();
+            $enseignantsParMatiere = Enseignant::whereHas('classes', function ($q) use ($classe) {
+                $q->where('classes.id', $classe->id);
+            })->get()->groupBy('matiere_id');
+
+            foreach ($matieres as $m) {
+                $profCollection = $enseignantsParMatiere->get($m->id);
+                if (!$profCollection || $profCollection->isEmpty()) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "⚠️ ERREUR D'AFFECTATION : Impossible de générer l'emploi pour {$classe->nom_classe}. Aucun professeur de " . strtoupper($m->nom_matiere) . " n'y est affecté !"
+                    ], 422);
+                }
+            }
+
             $classesSacrifiees = [];
             $result = $this->resolveWithCascadingBulldozer($classe, 0, $classesSacrifiees);
 
@@ -70,9 +87,9 @@ class AutoGeneratorController extends Controller
 
         Seance::whereIn('classe_id', $classes->pluck('id'))->delete();
 
-        // 🔥 Proactive Split
+        // 🔥 Proactive Split (2 7ta 3 classes)
         $this->forcedSplitClasses = [];
-        $numToSplit = rand(1, 2); 
+        $numToSplit = rand(2, 3); 
         $classesToSplit = $classes->random(min($numToSplit, $classes->count()));
         
         foreach ($classesToSplit as $c) {
@@ -82,12 +99,35 @@ class AutoGeneratorController extends Controller
         $logs = [];
         $failedClasses = [];
         $hasErrors = false;
+        $matieres = Matiere::all(); 
 
         try {
             foreach ($classes as $classe) {
                 DB::beginTransaction();
+
+                // 🔥 RADAR PRE-CHECK
+                $enseignantsParMatiere = Enseignant::whereHas('classes', function ($q) use ($classe) {
+                    $q->where('classes.id', $classe->id);
+                })->get()->groupBy('matiere_id');
+
+                $missingSubject = null;
+                foreach ($matieres as $m) {
+                    $profCollection = $enseignantsParMatiere->get($m->id);
+                    if (!$profCollection || $profCollection->isEmpty()) {
+                        $missingSubject = strtoupper($m->nom_matiere);
+                        break;
+                    }
+                }
+
+                if ($missingSubject) {
+                    DB::rollBack();
+                    $hasErrors = true;
+                    $logs[] = "❌ {$classe->nom_classe}";
+                    $failedClasses[] = "⛔ {$classe->nom_classe} :\n⚠️ ERREUR D'AFFECTATION : Aucun professeur de {$missingSubject} n'est affecté à ce groupe !";
+                    continue; 
+                }
+
                 $classesSacrifiees = [];
-                // Bda L-Hdem w L-Bni L-Mowajjah (Sniper)
                 $result = $this->resolveWithCascadingBulldozer($classe, 0, $classesSacrifiees);
 
                 if ($result['success']) {
@@ -122,49 +162,61 @@ class AutoGeneratorController extends Controller
 
     private function tryNormalAndSplit(Classe $classe, ?int $targetProfId = null, ?string $forcedSplit = null): array
     {
-        if ($forcedSplit) {
-            $res = $this->runBacktrackingEngine($classe, $forcedSplit, $targetProfId);
-            if ($res['success']) return $res;
+        // 🔥 L-FIX L-WA3ER (Random Restarts): N-jerbou 3 mrat b-toroq mkhtalfa bash i-koun Sreee3 w may-w7elsh!
+        for ($attempt = 0; $attempt < 3; $attempt++) {
             
-            $other = ($forcedSplit === 'ARAB') ? 'FRAN' : 'ARAB';
-            $res = $this->runBacktrackingEngine($classe, $other, $targetProfId);
-            if ($res['success']) return $res;
+            if ($forcedSplit) {
+                $res = $this->runBacktrackingEngine($classe, $forcedSplit, $targetProfId, $attempt);
+                if ($res['success'] || !empty($res['missing_prof'])) return $res;
+                
+                $other = ($forcedSplit === 'ARAB') ? 'FRAN' : 'ARAB';
+                $res = $this->runBacktrackingEngine($classe, $other, $targetProfId, $attempt);
+                if ($res['success'] || !empty($res['missing_prof'])) return $res;
 
-            return $this->runBacktrackingEngine($classe, null, $targetProfId);
+                $res = $this->runBacktrackingEngine($classe, null, $targetProfId, $attempt);
+                if ($res['success'] || !empty($res['missing_prof'])) return $res;
+                continue;
+            }
+
+            $res = $this->runBacktrackingEngine($classe, null, $targetProfId, $attempt);
+            if ($res['success'] || !empty($res['missing_prof'])) return $res;
+
+            $jokerSubjects = ['ARAB', 'FRAN'];
+            shuffle($jokerSubjects); 
+            
+            $res = $this->runBacktrackingEngine($classe, $jokerSubjects[0], $targetProfId, $attempt);
+            if ($res['success'] || !empty($res['missing_prof'])) return $res;
+
+            $res = $this->runBacktrackingEngine($classe, $jokerSubjects[1], $targetProfId, $attempt);
+            if ($res['success'] || !empty($res['missing_prof'])) return $res;
         }
 
-        $res = $this->runBacktrackingEngine($classe, null, $targetProfId);
-        if ($res['success']) return $res;
-
-        $jokerSubjects = ['ARAB', 'FRAN'];
-        shuffle($jokerSubjects); 
-        
-        $res = $this->runBacktrackingEngine($classe, $jokerSubjects[0], $targetProfId);
-        if ($res['success']) return $res;
-
-        return $this->runBacktrackingEngine($classe, $jokerSubjects[1], $targetProfId);
+        // Ila fshlou ga3 L-Mou7awalat, rje3 L-Erreur L-Khera
+        return $res ?? ['success' => false];
     }
 
     // ====================================================================
-    // CASCADING BULLDOZER — L-QNSS L-MOWAJJAH (Conflict-Directed) 🎯
+    // CASCADING BULLDOZER — L-QNSS L-MOWAJJAH 🎯
     // ====================================================================
     private function resolveWithCascadingBulldozer(Classe $classe, int $depth = 0, array &$sacrificedClasses = []): array
     {
         Seance::where('classe_id', $classe->id)->delete();
 
-        $forcedSplit = $this->forcedSplitClasses[$classe->id] ?? null;
+        // "Smart Relaxation" (Tarkhiyya)
+        $forcedSplit = ($depth === 0) ? ($this->forcedSplitClasses[$classe->id] ?? null) : null;
+
         $res = $this->tryNormalAndSplit($classe, null, $forcedSplit);
         if ($res['success']) return ['success' => true];
+        
+        if (!empty($res['missing_prof'])) return $res;
 
         $blockingProfId = $res['blocking_prof_id'] ?? null;
         $conflictingClasses = $res['conflicting_classes'] ?? [];
 
-        // 🔥 ILA W7EL, Y-SHOUF B-D-DBT L-CLASSES LI TLA9A M3AHOM F NFS L-WEQT!
         if ($blockingProfId && $depth < 8) { 
             
             $toSacrifice = $conflictingClasses;
 
-            // Ila l-Kounash khawi l-shi sabab, jbed b z-zher (Fallback)
             if (empty($toSacrifice)) {
                 $toSacrifice = Seance::select('classe_id')
                     ->where('enseignant_id', $blockingProfId)
@@ -176,13 +228,14 @@ class AutoGeneratorController extends Controller
                 shuffle($toSacrifice); 
             }
 
-            // N-jerbou n-hressohom dqa dqa w n-bniwhom
+            $toSacrifice = array_slice($toSacrifice, 0, 4);
+
             foreach ($toSacrifice as $sacrificedClassId) {
-                if (in_array($sacrificedClassId, $sacrificedClasses)) continue; // Mnoo3 n-hresso qism m-hress
+                if (in_array($sacrificedClassId, $sacrificedClasses)) continue; 
 
                 DB::beginTransaction(); 
                 try {
-                    // PHASE 1: SURGICAL STRIKE (Mse7 ghir L-Ostad)
+                    // PHASE 1: SURGICAL STRIKE
                     Seance::where('enseignant_id', $blockingProfId)
                         ->where('classe_id', $sacrificedClassId)
                         ->delete();
@@ -191,8 +244,6 @@ class AutoGeneratorController extends Controller
 
                     if ($retryRes['success']) {
                         $brokenClass = Classe::find($sacrificedClassId);
-                        
-                        // 3awed sayeb L-Ostad f L-Qism li hresna (Cascade)
                         $fixRes = $this->tryNormalAndSplit($brokenClass, $blockingProfId, null);
                         
                         if ($fixRes['success']) {
@@ -205,7 +256,7 @@ class AutoGeneratorController extends Controller
                     DB::rollBack();
                 }
 
-                // PHASE 2: HEAVY BULLDOZER (Ila Jarra7 msleksh, Hres l-Qism Kamel)
+                // PHASE 2: HEAVY BULLDOZER
                 DB::beginTransaction(); 
                 try {
                     Seance::where('classe_id', $sacrificedClassId)->delete();
@@ -248,9 +299,9 @@ class AutoGeneratorController extends Controller
     // ====================================================================
     private $profFailCounts = [];
     private $iterations = 0;
-    private $maxIterations = 500000;
+    private $maxIterations = 50000; // 🔥 N9essna L-Iteratons 7it dnay L-Restarts bzaaf (Sree3 bzaaf db!)
 
-    private function runBacktrackingEngine(Classe $classe, ?string $splitSubject, ?int $targetProfId = null): array
+    private function runBacktrackingEngine(Classe $classe, ?string $splitSubject, ?int $targetProfId = null, int $attempt = 0): array
     {
         $classeId = $classe->id;
         $matieres = Matiere::all();
@@ -262,8 +313,18 @@ class AutoGeneratorController extends Controller
         $blocksToPlace = [];
         
         foreach ($matieres as $m) {
-            $prof = $enseignantsParMatiere[$m->id]->first() ?? null;
-            if (!$prof) continue; 
+            $profCollection = $enseignantsParMatiere->get($m->id);
+            $prof = $profCollection ? $profCollection->first() : null;
+
+            if (!$prof) {
+                return [
+                    'success' => false,
+                    'message' => "⚠️ ERREUR D'AFFECTATION : Impossible de générer l'emploi pour {$classe->nom_classe}. Aucun professeur de " . strtoupper($m->nom_matiere) . " n'y est affecté !",
+                    'blocking_prof_id' => null,
+                    'conflicting_classes' => [],
+                    'missing_prof' => true
+                ];
+            }
             
             if ($targetProfId && $prof->id != $targetProfId) continue;
             
@@ -287,7 +348,7 @@ class AutoGeneratorController extends Controller
             } elseif (str_contains($nom, 'MATH')) {
                 for ($i = 0; $i < intval($vol / 2); $i++) $mBlocks[] = 2;
                 if ($vol % 2 !== 0) $mBlocks[] = 1;
-                shuffle($mBlocks); // Math mkhelet
+                shuffle($mBlocks); 
             } elseif (str_contains($nom, 'ISLAMIC') || str_contains($nom, 'ISLAM')) {
                 $mBlocks = [2, 1];
             } elseif (str_contains($nom, 'ANG')) {
@@ -343,16 +404,17 @@ class AutoGeneratorController extends Controller
             $jour = $s->jour;
             $hStart = (int) substr($s->heure_debut, 0, 2);
             $duree = (int) substr($s->heure_fin, 0, 2) - $hStart;
-            $cId = $s->classe_id; // 🔥 N-jebdo L-ID dyal L-Qism li m-occuper L-Ostad
+            $cId = $s->classe_id; 
 
             for ($i = 0; $i < $duree; $i++) {
-                $profGrid[$eId][$jour][$hStart + $i] = $cId; // N-sjjlo L-Qism fblast True
+                $profGrid[$eId][$jour][$hStart + $i] = $cId; 
             }
             $profDailyLoad[$eId][$jour] = ($profDailyLoad[$eId][$jour] ?? 0) + $duree;
             $profTotalLoad[$eId] = ($profTotalLoad[$eId] ?? 0) + $duree;
         }
 
-        usort($blocksToPlace, function ($a, $b) use ($profTotalLoad) {
+        // 🔥 DAKA2 T-TARTIB: Khellet T-Tartib b z-zher 3la 7ssab L-Attempt bash my-w7elsh f nfs triq!
+        usort($blocksToPlace, function ($a, $b) use ($profTotalLoad, $attempt) {
             $loadA = $profTotalLoad[$a['prof_id']] ?? 0;
             $loadB = $profTotalLoad[$b['prof_id']] ?? 0;
 
@@ -361,9 +423,12 @@ class AutoGeneratorController extends Controller
 
             if ($a['mandatory'] && !$b['mandatory']) return -1;
             if (!$a['mandatory'] && $b['mandatory']) return 1;
+            
+            if ($loadA !== $loadB) return $loadB <=> $loadA; 
             if ($a['duree'] !== $b['duree']) return $b['duree'] <=> $a['duree'];
             
-            return $loadB <=> $loadA; 
+            // Hna l-qaleb: khelet l-Mawad l-mtshabhin bash L-Code i-jreb triq jdida f kola attempt
+            return rand(-1, 1); 
         });
 
         $grid = [];
@@ -389,7 +454,7 @@ class AutoGeneratorController extends Controller
         }
         
         $this->profFailCounts = [];
-        $this->conflictTracker = []; // Re-initialiser L-Kounash
+        $this->conflictTracker = []; 
         $this->iterations = 0;
 
         if ($this->backtrackRec($blocksToPlace, 0, $grid, $profGrid, $profDailyLoad, $classSubjectsDay, $classProfsDay)) {
@@ -427,7 +492,6 @@ class AutoGeneratorController extends Controller
             arsort($this->profFailCounts);
             $blockingProfId = array_key_first($this->profFailCounts);
             
-            // Jbed L-A9sam li khnqou had L-Ostad b-d-dbt
             if (isset($this->conflictTracker[$blockingProfId])) {
                 arsort($this->conflictTracker[$blockingProfId]);
                 $conflictingClasses = array_keys($this->conflictTracker[$blockingProfId]);
@@ -460,12 +524,13 @@ class AutoGeneratorController extends Controller
         if ($block['mandatory']) {
             $jours = [$block['mandatory']];
         } else {
-            usort($jours, function($j1, $j2) use ($profDailyLoad, $prof_id) {
-                $load1 = $profDailyLoad[$prof_id][$j1] ?? 0;
-                $load2 = $profDailyLoad[$prof_id][$j2] ?? 0;
-                if ($load1 !== $load2) return $load1 <=> $load2; 
-                return rand(-1, 1);
-            });
+            // 🔥 FIX L-SOR3A (asort f blast usort): Hadi kat-sre3 L-Code 100 mra!
+            $loads = [];
+            foreach ($jours as $j) {
+                $loads[$j] = $profDailyLoad[$prof_id][$j] ?? 0;
+            }
+            asort($loads); // Rttb L-Ayam mn L-khawi l-L3amer b-sor3a
+            $jours = array_keys($loads);
         }
 
         $placed = false;
@@ -500,7 +565,6 @@ class AutoGeneratorController extends Controller
                     }
                     if (isset($profGrid[$prof_id][$jour][$h + $i])) {
                         $conflict = true; 
-                        // 🔥 SJEL L-QISM LI TLA9A M3AH F NFS L-WEQT!
                         $conflictingClassId = $profGrid[$prof_id][$jour][$h + $i];
                         if (is_numeric($conflictingClassId)) {
                             $this->conflictTracker[$prof_id][$conflictingClassId] = ($this->conflictTracker[$prof_id][$conflictingClassId] ?? 0) + 1;

@@ -313,7 +313,7 @@ export default function Configuration() {
                           <span>{mat.nom_matiere}</span>
                           {/* Highlight if it is Assasiya or Secondaire */}
                           <span className={`text-[9px] font-bold mt-0.5 tracking-widest ${mat.type === 'assasiya' ? 'text-indigo-500' : 'text-gray-400'}`}>
-                            {mat.type === 'assasiya' ? 'PRINCIPALE (ASSASIYA)' : 'SECONDAIRE'}
+                            {mat.type === 'assasiya' ? 'PRINCIPALE' : 'SECONDAIRE'}
                           </span>
                         </div>
                       </span>
@@ -405,7 +405,7 @@ export default function Configuration() {
                       value={formData.type || 'assasiya'}
                       onChange={(e) => setFormData({...formData, type: e.target.value})}
                     >
-                      <option value="assasiya">Matière Principale (Assasiya) - Max 6h/j</option>
+                      <option value="assasiya">Matière Principale - Max 6h/j</option>
                       <option value="secondaire">Matière Secondaire - Max 7h/j</option>
                     </select>
                   </div>
