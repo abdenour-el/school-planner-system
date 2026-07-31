@@ -9,9 +9,23 @@ class Classe extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['nom_classe', 'niveau'];
+    protected $fillable = [
+        'nom_classe', 
+        'niveau'
+    ];
 
-    // Define the relationship with Seance (one-to-many)
+    /**
+     * Relationship: A class can have many teachers.
+     * This uses the pivot table 'classe_enseignant'.
+     */
+    public function enseignants()
+    {
+        return $this->belongsToMany(Enseignant::class, 'classe_enseignant')->withTimestamps();
+    }
+
+    /**
+     * Relationship: A class has many sessions.
+     */
     public function seances()
     {
         return $this->hasMany(Seance::class);

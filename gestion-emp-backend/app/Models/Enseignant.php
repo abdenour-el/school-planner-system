@@ -9,27 +9,34 @@ class Enseignant extends Model
 {
     use HasFactory;
 
-    // cette propriété indique à Laravel quels champs peuvent être remplis en masse (mass assignment)
+    // Fields that can be filled in the database
     protected $fillable = [
         'nom', 
-        'prenom',
+        'prenom', 
         'matiere_id', 
-        'max_heures', 
-        'nombre_groupes', 
-        'niveaux'
+        'max_heures' // We kept this as requested
     ];
 
-    // obliger Laravel à traiter le champ 'niveaux' comme un tableau JSON, ce qui facilite son utilisation dans le code
-    protected $casts = [
-        'niveaux' => 'array'
-    ];
-
-    // prof can teach one subject (matiere_id is a foreign key to the matieres table)
+    /**
+     * Relationship: A teacher belongs to one subject (Matiere).
+     */
     public function matiere()
     {
         return $this->belongsTo(Matiere::class);
     }
-    // prof can have many seances (one-to-many relationship)
+
+    /**
+     * Relationship: A teacher can teach many specific classes.
+     * This uses the new pivot table 'classe_enseignant'.
+     */
+    public function classes()
+    {
+        return $this->belongsToMany(Classe::class, 'classe_enseignant')->withTimestamps();
+    }
+
+    /**
+     * Relationship: A teacher has many sessions (Seances).
+     */
     public function seances()
     {
         return $this->hasMany(Seance::class);

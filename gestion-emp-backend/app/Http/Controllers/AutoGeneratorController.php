@@ -12,470 +12,594 @@ use Throwable;
 
 class AutoGeneratorController extends Controller
 {
+    private $forcedSplitClasses = [];
+    private $conflictTracker = []; 
+
     public function resetAll()
     {
         Seance::truncate();
-        return response()->json(['message' => 'Toutes les séances ont été effacées.']);
+        return response()->json(['message' => 'Toutes les séances ont été supprimées avec succès.']);
     }
 
     public function generate(Request $request)
     {
-        // Increase time and memory limits for the complex algorithm
-        set_time_limit(1200); 
-        ini_set('memory_limit', '1024M'); 
+        set_time_limit(3600); 
+        ini_set('memory_limit', '2048M');
 
         try {
             $request->validate(['classe_id' => 'required|exists:classes,id']);
             $classe = Classe::findOrFail($request->classe_id);
-            
+
+            $this->forcedSplitClasses = []; 
+
             DB::beginTransaction();
-            $classesSacrifiees = []; 
-            
-            // Start the Backtracking (Bulldozer) Engine
-            $result = $this->resolveWithBulldozer($classe, 0, $classesSacrifiees);
-            
+
+            // 🔥 RADAR PRE-CHECK
+            $matieres = Matiere::all();
+            $enseignantsParMatiere = Enseignant::whereHas('classes', function ($q) use ($classe) {
+                $q->where('classes.id', $classe->id);
+            })->get()->groupBy('matiere_id');
+
+            foreach ($matieres as $m) {
+                $profCollection = $enseignantsParMatiere->get($m->id);
+                if (!$profCollection || $profCollection->isEmpty()) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "⚠️ ERREUR D'AFFECTATION : Impossible de générer l'emploi pour {$classe->nom_classe}. Aucun professeur de " . strtoupper($m->nom_matiere) . " n'y est affecté !"
+                    ], 422);
+                }
+            }
+
+            $classesSacrifiees = [];
+            $result = $this->resolveWithCascadingBulldozer($classe, 0, $classesSacrifiees);
+
             if ($result['success']) {
                 DB::commit();
-                $msg = '✅ Emploi généré avec succès.';
+                $msg = 'Emploi du temps généré avec succès.';
                 if (count($classesSacrifiees) > 0) {
-                    $msg .= " (L'IA a modifié automatiquement " . count($classesSacrifiees) . " autre(s) classe(s) pour libérer les professeurs !)";
+                    $msg .= " (Le système a réorganisé " . count($classesSacrifiees) . " classe(s) conflictuelle(s) en cascade).";
                 }
                 return response()->json(['message' => $msg], 200);
-            } else {
-                DB::rollBack(); // Revert database to original state on failure
-                
-                // Return the precise error message without the "OPERATION ANNULEE" prefix
-                return response()->json(['message' => $result['message']], 422);
             }
-        } catch (Throwable $e) { 
+
             DB::rollBack();
-            return response()->json(['message' => "ERREUR SYSTÈME CRITIQUE :\n" . $e->getMessage()], 500);
+            $errMsg = $result['message'] ?? "Erreur de placement insurmontable.";
+            return response()->json(['message' => $errMsg], 422);
+
+        } catch (Throwable $e) {
+            DB::rollBack();
+            return response()->json(['message' => "ERREUR CRITIQUE :\n" . $e->getMessage()], 500);
         }
     }
 
-    // ====================================================================
-    // BACKTRACKING ENGINE (BULLDOZER ALGORITHM)
-    // ====================================================================
-    private function resolveWithBulldozer(Classe $classe, $depth = 0, &$sacrificedClasses = []) 
+    public function generateAll(Request $request)
     {
-        // 1. Delete current class sessions to start fresh
-        Seance::where('classe_id', $classe->id)->delete();
-        
-        // 2. Try normal generation
-        $result = $this->runAlgorithm($classe);
-        
-        if ($result['success']) {
-            return ['success' => true];
+        set_time_limit(3600);
+        ini_set('memory_limit', '2048M');
+
+        $request->validate(['niveau' => 'required|integer']);
+
+        $classes = Classe::where('niveau', $request->niveau)->inRandomOrder()->get();
+
+        if ($classes->isEmpty()) {
+            return response()->json(['message' => "Aucune classe trouvée pour ce niveau."], 404);
         }
+
+        Seance::whereIn('classe_id', $classes->pluck('id'))->delete();
+
+        // 🔥 Proactive Split (2 7ta 3 classes)
+        $this->forcedSplitClasses = [];
+        $numToSplit = rand(2, 3); 
+        $classesToSplit = $classes->random(min($numToSplit, $classes->count()));
         
-        // 3. If it fails, check depth limit (Max 4 classes to avoid infinite loops)
-        if ($depth >= 4) {
-            return $result; 
+        foreach ($classesToSplit as $c) {
+            $this->forcedSplitClasses[$c->id] = (rand(0, 1) == 0) ? 'ARAB' : 'FRAN';
         }
-        
-        $blockingProfId = $result['blocking_prof_id'] ?? null;
-        
-        if ($blockingProfId) {
-            // Find an older class using this blocking professor to "steal" their hours
-            $seanceToSacrifice = Seance::where('enseignant_id', $blockingProfId)
-                                       ->where('classe_id', '!=', $classe->id)
-                                       ->whereNotIn('classe_id', $sacrificedClasses)
-                                       ->inRandomOrder()
-                                       ->first();
-            
-            if ($seanceToSacrifice) {
-                $sacrificedClassId = $seanceToSacrifice->classe_id;
-                $sacrificedClasses[] = $sacrificedClassId; // Add to blacklist
-                
-                // DESTROY THE BLOCKING CLASS
-                Seance::where('classe_id', $sacrificedClassId)->delete();
-                
-                // Retry generating the current class (The professor is now free)
-                $retryResult = $this->runAlgorithm($classe);
-                
-                if ($retryResult['success']) {
-                    // Success! Now we must recursively rebuild the class we just destroyed
-                    $classeASacrifier = Classe::find($sacrificedClassId);
-                    return $this->resolveWithBulldozer($classeASacrifier, $depth + 1, $sacrificedClasses);
+
+        $logs = [];
+        $failedClasses = [];
+        $hasErrors = false;
+        $matieres = Matiere::all(); 
+
+        try {
+            foreach ($classes as $classe) {
+                DB::beginTransaction();
+
+                // 🔥 RADAR PRE-CHECK
+                $enseignantsParMatiere = Enseignant::whereHas('classes', function ($q) use ($classe) {
+                    $q->where('classes.id', $classe->id);
+                })->get()->groupBy('matiere_id');
+
+                $missingSubject = null;
+                foreach ($matieres as $m) {
+                    $profCollection = $enseignantsParMatiere->get($m->id);
+                    if (!$profCollection || $profCollection->isEmpty()) {
+                        $missingSubject = strtoupper($m->nom_matiere);
+                        break;
+                    }
+                }
+
+                if ($missingSubject) {
+                    DB::rollBack();
+                    $hasErrors = true;
+                    $logs[] = "❌ {$classe->nom_classe}";
+                    $failedClasses[] = "⛔ {$classe->nom_classe} :\n⚠️ ERREUR D'AFFECTATION : Aucun professeur de {$missingSubject} n'est affecté à ce groupe !";
+                    continue; 
+                }
+
+                $classesSacrifiees = [];
+                $result = $this->resolveWithCascadingBulldozer($classe, 0, $classesSacrifiees);
+
+                if ($result['success']) {
+                    DB::commit();
+                    $splitMsg = isset($this->forcedSplitClasses[$classe->id]) ? " (Split Anticipé : " . $this->forcedSplitClasses[$classe->id] . ")" : "";
+                    $logs[] = "✔ {$classe->nom_classe}" . $splitMsg;
                 } else {
-                    // Failed again despite destruction
-                    return $retryResult;
+                    DB::rollBack();
+                    $hasErrors = true;
+                    $logs[] = "❌ {$classe->nom_classe}";
+                    $errMsg = $result['message'] ?? 'Erreur inconnue de placement.';
+                    $failedClasses[] = "⛔ {$classe->nom_classe} :\n" . $errMsg;
+                }
+            }
+
+            if ($hasErrors) {
+                return response()->json([
+                    'message' => "Génération incomplète ! Classes en échec :\n\n" . implode("\n\n", $failedClasses),
+                    'details' => $logs
+                ], 422);
+            }
+
+            return response()->json([
+                'message' => "Génération terminée avec succès sans conflits.",
+                'details' => $logs
+            ]);
+
+        } catch (Throwable $e) {
+            return response()->json(['message' => 'Erreur système : ' . $e->getMessage()], 500);
+        }
+    }
+
+    private function tryNormalAndSplit(Classe $classe, ?int $targetProfId = null, ?string $forcedSplit = null): array
+    {
+        // 🔥 L-FIX L-WA3ER (Random Restarts): N-jerbou 3 mrat b-toroq mkhtalfa bash i-koun Sreee3 w may-w7elsh!
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            
+            if ($forcedSplit) {
+                $res = $this->runBacktrackingEngine($classe, $forcedSplit, $targetProfId, $attempt);
+                if ($res['success'] || !empty($res['missing_prof'])) return $res;
+                
+                $other = ($forcedSplit === 'ARAB') ? 'FRAN' : 'ARAB';
+                $res = $this->runBacktrackingEngine($classe, $other, $targetProfId, $attempt);
+                if ($res['success'] || !empty($res['missing_prof'])) return $res;
+
+                $res = $this->runBacktrackingEngine($classe, null, $targetProfId, $attempt);
+                if ($res['success'] || !empty($res['missing_prof'])) return $res;
+                continue;
+            }
+
+            $res = $this->runBacktrackingEngine($classe, null, $targetProfId, $attempt);
+            if ($res['success'] || !empty($res['missing_prof'])) return $res;
+
+            $jokerSubjects = ['ARAB', 'FRAN'];
+            shuffle($jokerSubjects); 
+            
+            $res = $this->runBacktrackingEngine($classe, $jokerSubjects[0], $targetProfId, $attempt);
+            if ($res['success'] || !empty($res['missing_prof'])) return $res;
+
+            $res = $this->runBacktrackingEngine($classe, $jokerSubjects[1], $targetProfId, $attempt);
+            if ($res['success'] || !empty($res['missing_prof'])) return $res;
+        }
+
+        // Ila fshlou ga3 L-Mou7awalat, rje3 L-Erreur L-Khera
+        return $res ?? ['success' => false];
+    }
+
+    // ====================================================================
+    // CASCADING BULLDOZER — L-QNSS L-MOWAJJAH 🎯
+    // ====================================================================
+    private function resolveWithCascadingBulldozer(Classe $classe, int $depth = 0, array &$sacrificedClasses = []): array
+    {
+        Seance::where('classe_id', $classe->id)->delete();
+
+        // "Smart Relaxation" (Tarkhiyya)
+        $forcedSplit = ($depth === 0) ? ($this->forcedSplitClasses[$classe->id] ?? null) : null;
+
+        $res = $this->tryNormalAndSplit($classe, null, $forcedSplit);
+        if ($res['success']) return ['success' => true];
+        
+        if (!empty($res['missing_prof'])) return $res;
+
+        $blockingProfId = $res['blocking_prof_id'] ?? null;
+        $conflictingClasses = $res['conflicting_classes'] ?? [];
+
+        if ($blockingProfId && $depth < 8) { 
+            
+            $toSacrifice = $conflictingClasses;
+
+            if (empty($toSacrifice)) {
+                $toSacrifice = Seance::select('classe_id')
+                    ->where('enseignant_id', $blockingProfId)
+                    ->where('classe_id', '!=', $classe->id)
+                    ->whereNotIn('classe_id', $sacrificedClasses)
+                    ->groupBy('classe_id')
+                    ->pluck('classe_id')
+                    ->toArray();
+                shuffle($toSacrifice); 
+            }
+
+            $toSacrifice = array_slice($toSacrifice, 0, 4);
+
+            foreach ($toSacrifice as $sacrificedClassId) {
+                if (in_array($sacrificedClassId, $sacrificedClasses)) continue; 
+
+                DB::beginTransaction(); 
+                try {
+                    // PHASE 1: SURGICAL STRIKE
+                    Seance::where('enseignant_id', $blockingProfId)
+                        ->where('classe_id', $sacrificedClassId)
+                        ->delete();
+                    
+                    $retryRes = $this->tryNormalAndSplit($classe, null, $forcedSplit);
+
+                    if ($retryRes['success']) {
+                        $brokenClass = Classe::find($sacrificedClassId);
+                        $fixRes = $this->tryNormalAndSplit($brokenClass, $blockingProfId, null);
+                        
+                        if ($fixRes['success']) {
+                            DB::commit(); 
+                            return ['success' => true];
+                        }
+                    }
+                    DB::rollBack();
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                }
+
+                // PHASE 2: HEAVY BULLDOZER
+                DB::beginTransaction(); 
+                try {
+                    Seance::where('classe_id', $sacrificedClassId)->delete();
+                    
+                    $retryRes = $this->tryNormalAndSplit($classe, null, $forcedSplit);
+
+                    if ($retryRes['success']) {
+                        $sacrificedClasses[] = $sacrificedClassId;
+                        $brokenClass = Classe::find($sacrificedClassId);
+                        
+                        $fixRes = $this->resolveWithCascadingBulldozer($brokenClass, $depth + 1, $sacrificedClasses);
+                        
+                        if ($fixRes['success']) {
+                            DB::commit(); 
+                            return ['success' => true];
+                        }
+                        array_pop($sacrificedClasses);
+                    }
+                    DB::rollBack();
+                } catch (\Exception $e) {
+                    DB::rollBack();
                 }
             }
         }
-        
-        return $result;
+
+        $profName = 'INCONNU';
+        if ($blockingProfId) {
+            $prof = Enseignant::find($blockingProfId);
+            if ($prof) $profName = strtoupper("{$prof->nom} {$prof->prenom}");
+        }
+        return [
+            'success' => false,
+            'message' => "⚠️ BLOCAGE DANS LA CLASSE : {$classe->nom_classe}\nLe professeur {$profName} est saturé.\n💡 L'algorithme a ciblé les classes exactes qui ont causé le conflit en même temps, mais la grille est totalement bloquée.",
+            'blocking_prof_id' => $blockingProfId
+        ];
     }
 
     // ====================================================================
-    // STANDARD GENERATION ENGINE
+    // MOKHE L-BACKTRACKING (AI HEURISTICS)
     // ====================================================================
-    private function runAlgorithm(Classe $classe)
+    private $profFailCounts = [];
+    private $iterations = 0;
+    private $maxIterations = 50000; // 🔥 N9essna L-Iteratons 7it dnay L-Restarts bzaaf (Sree3 bzaaf db!)
+
+    private function runBacktrackingEngine(Classe $classe, ?string $splitSubject, ?int $targetProfId = null, int $attempt = 0): array
     {
         $classeId = $classe->id;
         $matieres = Matiere::all();
-        if ($matieres->sum('volume_horaire') != 32) return ['success' => false, 'message' => "Le total doit être de 32h."];
 
-        // Filter valid teachers for this class level
-        $enseignantsParMatiere = Enseignant::all()->filter(function($prof) use ($classe) {
-            return is_array($prof->niveaux) && in_array((string)$classe->niveau, $prof->niveaux);
-        })->groupBy('matiere_id');
+        $enseignantsParMatiere = Enseignant::whereHas('classes', function ($q) use ($classeId) {
+            $q->where('classes.id', $classeId);
+        })->get()->groupBy('matiere_id');
 
-        $suiviMatiereInitial = [];
-        $holySubjects = []; 
-
-        // Initialize tracking and check for subjects without any teachers
+        $blocksToPlace = [];
+        
         foreach ($matieres as $m) {
-            if (!isset($enseignantsParMatiere[$m->id]) || $enseignantsParMatiere[$m->id]->isEmpty()) {
-                return ['success' => false, 'message' => "Aucun professeur qualifié n'a été trouvé pour la matière : " . strtoupper($m->nom_matiere)];
-            }
-            $nomMat = strtoupper($m->nom_matiere);
-            $suiviMatiereInitial[$m->id] = [
-                'matiere_id' => $m->id,
-                'reste' => $m->volume_horaire,
-                'nom' => $nomMat,
-                'enseignants' => $enseignantsParMatiere[$m->id]->values()->all() 
-            ];
-            if (str_contains($nomMat, 'MATH') || str_contains($nomMat, 'ARAB') || str_contains($nomMat, 'FRAN')) {
-                $holySubjects[] = $m->id;
-            }
-        }
+            $profCollection = $enseignantsParMatiere->get($m->id);
+            $prof = $profCollection ? $profCollection->first() : null;
 
-        // Fetch existing sessions to calculate current loads
-        $allSeancesDBArray = Seance::where('classe_id', '!=', $classeId)->get()->toArray();
-        $dbHeuresProfJour = [];
-        $dbSeancesProf = [];
-        $dbTotalHeuresProf = [];
-
-        foreach($allSeancesDBArray as $s) {
-            $eId = $s['enseignant_id'];
-            $jour = $s['jour'];
-            $duree = (strtotime($s['heure_fin']) - strtotime($s['heure_debut'])) / 3600;
-
-            if(!isset($dbHeuresProfJour[$eId][$jour])) $dbHeuresProfJour[$eId][$jour] = 0;
-            $dbHeuresProfJour[$eId][$jour] += $duree;
-
-            if(!isset($dbTotalHeuresProf[$eId])) $dbTotalHeuresProf[$eId] = 0;
-            $dbTotalHeuresProf[$eId] += $duree;
-
-            if(!isset($dbSeancesProf[$eId][$jour])) $dbSeancesProf[$eId][$jour] = [];
-            $dbSeancesProf[$eId][$jour][] = ['debut' => strtotime($s['heure_debut']), 'fin' => strtotime($s['heure_fin'])];
-        }
-
-        // ====================================================================
-        // 🔥 PRE-CHECK: DETAILED CAPACITY VERIFICATION (THE FIX) 🔥
-        // Checks if teachers have enough free hours BEFORE running the algorithm
-        // ====================================================================
-        $capacityErrors = [];
-        foreach ($suiviMatiereInitial as $mId => $data) {
-            $totalAvailableHours = 0;
-            $profDetails = [];
-            
-            foreach ($data['enseignants'] as $prof) {
-                $dbHeures = $dbTotalHeuresProf[$prof->id] ?? 0;
-                $dispo = max(0, $prof->max_heures - $dbHeures);
-                $totalAvailableHours += $dispo;
-                $profDetails[] = "   👉 {$prof->nom} {$prof->prenom} (Libre: {$dispo}h / Max: {$prof->max_heures}h)";
+            if (!$prof) {
+                return [
+                    'success' => false,
+                    'message' => "⚠️ ERREUR D'AFFECTATION : Impossible de générer l'emploi pour {$classe->nom_classe}. Aucun professeur de " . strtoupper($m->nom_matiere) . " n'y est affecté !",
+                    'blocking_prof_id' => null,
+                    'conflicting_classes' => [],
+                    'missing_prof' => true
+                ];
             }
             
-            if ($totalAvailableHours < $data['reste']) {
-                $details = implode("\n", $profDetails);
-                $capacityErrors[] = "⚠️ DÉFICIT D'HEURES POUR '{$data['nom']}' :\n   Besoin : {$data['reste']}h | Disponibilité totale des profs : {$totalAvailableHours}h\n{$details}";
-            }
-        }
-
-        // Abort immediately with detailed stats if capacity is insufficient
-        if (!empty($capacityErrors)) {
-            return ['success' => false, 'message' => implode("\n\n", $capacityErrors)];
-        }
-
-        $maxRetries = 8000; 
-        $bestSuiviMatiere = [];
-        $minReste = 999;
-
-        // Loop engine for combinatorial attempts
-        for ($retry = 0; $retry < $maxRetries; $retry++) {
+            if ($targetProfId && $prof->id != $targetProfId) continue;
             
-            $isRelaxedMode = ($retry > 2000); 
-            $isPanicMode = ($retry > 4000);
-
-            $suiviMatiere = $suiviMatiereInitial;
-            $seancesToCreate = [];
-            $retryFailedEarly = false;
-
-            // 1. PROFESSOR ASSIGNMENT
-            foreach ($suiviMatiere as $mId => &$data) {
-                $profsValides = [];
-                $isHoly = in_array($mId, $holySubjects);
-
-                foreach ($data['enseignants'] as $prof) {
-                    $dbHeures = $dbTotalHeuresProf[$prof->id] ?? 0;
-                    if (($prof->max_heures - $dbHeures) >= $data['reste']) {
-                        
-                        // Prevent overloading teachers on Monday/Friday for major subjects
-                        if ($isHoly) {
-                            $hLundi = $dbHeuresProfJour[$prof->id]['Lundi'] ?? 0;
-                            $hVendredi = $dbHeuresProfJour[$prof->id]['Vendredi'] ?? 0;
-                            if ($hLundi >= 6 || $hVendredi >= 6) continue; 
-                        }
-
-                        $profsValides[] = ['prof' => $prof, 'dispo' => ($prof->max_heures - $dbHeures)];
-                    }
-                }
-                
-                if (empty($profsValides)) { $retryFailedEarly = true; break; }
-                
-                // Sort by most available
-                usort($profsValides, function($a, $b) { return $b['dispo'] <=> $a['dispo']; });
-                
-                // Pick a suitable professor
-                $poolSize = $isRelaxedMode ? count($profsValides) : max(1, ceil(count($profsValides) / 2));
-                $picked = $profsValides[array_rand(array_slice($profsValides, 0, $poolSize))];
-                $data['assigned_prof'] = $picked['prof']; 
-            }
-
-            if ($retryFailedEarly) continue; 
-
-            // Time slots initialization
-            $jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
-            $slots = [];
-            foreach ($jours as $jour) {
-                $slots[] = ['jour' => $jour, 'debut' => '09:00', 'fin' => '11:00', 'duree' => 2, 'filled' => false];
-                $slots[] = ['jour' => $jour, 'debut' => '11:00', 'fin' => '13:00', 'duree' => 2, 'filled' => false];
-                if ($jour !== 'Mercredi') { 
-                    $slots[] = ['jour' => $jour, 'debut' => '16:00', 'fin' => '18:00', 'duree' => 2, 'filled' => false];
-                    $slots[] = ['jour' => $jour, 'debut' => '18:00', 'fin' => '19:00', 'duree' => 1, 'filled' => false];
-                }
-            }
-
-            // Conflict and load tracking helpers
-            $getLocalHeures = function($ostadId, $jour) use (&$seancesToCreate) {
-                $h = 0; foreach($seancesToCreate as $s) if($s['enseignant_id'] == $ostadId && $s['jour'] == $jour) $h += $s['duree']; return $h;
-            };
-
-            $checkConflict = function($ostadId, $jour, $debut, $fin) use (&$seancesToCreate, &$dbSeancesProf) {
-                $startTS = strtotime($debut); $endTS = strtotime($fin);
-                if (isset($dbSeancesProf[$ostadId][$jour])) {
-                    foreach ($dbSeancesProf[$ostadId][$jour] as $s) {
-                        if ($startTS < $s['fin'] && $s['debut'] < $endTS) return true;
-                    }
-                }
-                foreach ($seancesToCreate as $sLocal) {
-                    if ($sLocal['enseignant_id'] == $ostadId && $sLocal['jour'] == $jour) {
-                        if ($startTS < strtotime($sLocal['heure_fin']) && strtotime($sLocal['heure_debut']) < $endTS) return true;
-                    }
-                }
-                return false;
-            };
-
-            $hasAdjacentClass = function($ostadId, $jour, $debut, $fin) use (&$dbSeancesProf, &$seancesToCreate) {
-                $debutTs = strtotime($debut); $finTs = strtotime($fin);
-                if (isset($dbSeancesProf[$ostadId][$jour])) {
-                    foreach ($dbSeancesProf[$ostadId][$jour] as $s) {
-                        if ($s['fin'] == $debutTs || $s['debut'] == $finTs) return true;
-                    }
-                }
-                foreach ($seancesToCreate as $sLocal) {
-                    if ($sLocal['enseignant_id'] == $ostadId && $sLocal['jour'] == $jour) {
-                        if (strtotime($sLocal['heure_fin']) == $debutTs || strtotime($sLocal['heure_debut']) == $finTs) return true;
-                    }
-                }
-                return false;
-            };
-
-            // HOLY TRINITY BOOKING (Math, French, Arabic Priority)
-            $math1hDay = (rand(0, 1) == 0) ? 'Lundi' : 'Vendredi';
-
-            $bookHolyTrinity = function($jourTarget) use (&$slots, &$seancesToCreate, &$suiviMatiere, $checkConflict, $holySubjects, $classeId, $getLocalHeures, $math1hDay) {
-                $matieresRequises = $holySubjects;
-                shuffle($matieresRequises);
-
-                foreach ($matieresRequises as $mId) {
-                    if ($suiviMatiere[$mId]['reste'] <= 0) continue;
-
-                    $nomMatiere = $suiviMatiere[$mId]['nom'];
-                    $ostadId = $suiviMatiere[$mId]['assigned_prof']->id;
-
-                    $dureeRequise = 2;
-                    if ($jourTarget == $math1hDay && str_contains($nomMatiere, 'MATH')) {
-                        $dureeRequise = 1;
-                    }
-
-                    $placed = false;
-                    $slotKeys = array_keys($slots);
-                    shuffle($slotKeys);
-
-                    foreach ($slotKeys as $k) {
-                        $slot = $slots[$k];
-                        if ($slot['jour'] != $jourTarget || $slot['filled']) continue;
-
-                        $localHeures = $getLocalHeures($ostadId, $jourTarget);
-                        if ($localHeures >= 6) continue;
-
-                        $dureesATester = [];
-                        if ($slot['duree'] == 2) {
-                            $dureesATester = (rand(0, 1) == 0) ? [2, 1] : [1, 2];
-                        } else {
-                            $dureesATester = [1];
-                        }
-
-                        foreach ($dureesATester as $dureeRequise) {
-                            if ($suiviMatiere[$mId]['reste'] < $dureeRequise) continue;
-                            if ($localHeures + $dureeRequise > 6) continue;
-
-                            $heureFin = date('H:i', strtotime($slot['debut'] . " +{$dureeRequise} hour"));
-                            if ($checkConflict($ostadId, $jourTarget, $slot['debut'], $heureFin)) continue;
-
-                            if ($dureeRequise < $slot['duree']) {
-                                $slots[] = ['jour' => $jourTarget, 'debut' => $heureFin, 'fin' => $slot['fin'], 'duree' => ($slot['duree'] - $dureeRequise), 'filled' => false];
-                            }
-
-                            $seancesToCreate[] = [
-                                'classe_id' => $classeId, 'enseignant_id' => $ostadId, 'matiere_id' => $mId,
-                                'jour' => $jourTarget, 'heure_debut' => $slot['debut'], 'heure_fin' => $heureFin, 'duree' => $dureeRequise
-                            ];
-                            $slots[$k]['filled'] = true;
-                            $suiviMatiere[$mId]['reste'] -= $dureeRequise;
-                            $placed = true;
-                            break; 
-                        }
-                        if ($placed) break;
-                    }
-                    if (!$placed) return false;
-                }
-                return true;
-            };
-
-            // Execute priority booking
-            if (!$bookHolyTrinity('Lundi') || (!$bookHolyTrinity('Vendredi'))) continue; 
-
-            // REMAINING SUBJECTS BOOKING
-            $attempts = 0;
-            while ($attempts < 150) {
-                $keys = array_keys($suiviMatiere);
-                
-                usort($keys, function($a, $b) use ($suiviMatiere, $isPanicMode, $dbTotalHeuresProf) {
-                    if ($isPanicMode) {
-                        // Prioritize teachers with lowest free time available
-                        $freeA = $suiviMatiere[$a]['assigned_prof']->max_heures - ($dbTotalHeuresProf[$suiviMatiere[$a]['assigned_prof']->id] ?? 0);
-                        $freeB = $suiviMatiere[$b]['assigned_prof']->max_heures - ($dbTotalHeuresProf[$suiviMatiere[$b]['assigned_prof']->id] ?? 0);
-                        if ($freeA != $freeB) return $freeA <=> $freeB; 
-                    }
-                    return $suiviMatiere[$b]['reste'] <=> $suiviMatiere[$a]['reste'];
-                });
-                
-                $progress = false;
-
-                foreach ($keys as $mId) {
-                    if ($suiviMatiere[$mId]['reste'] <= 0) continue;
-                    
-                    $nomMatiere = $suiviMatiere[$mId]['nom'];
-                    $ostadId = $suiviMatiere[$mId]['assigned_prof']->id;
-
-                    $joursShuffled = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi']; 
-                    shuffle($joursShuffled);
-
-                    foreach ($joursShuffled as $jour) {
-                        if ($suiviMatiere[$mId]['reste'] <= 0) break;
-                        
-                        $dejaCeJour = false;
-                        foreach($seancesToCreate as $sC) { if($sC['matiere_id'] == $mId && $sC['jour'] == $jour) { $dejaCeJour = true; break; } }
-                        if($dejaCeJour) continue;
-                        
-                        $is1hStrict = str_contains($nomMatiere, 'ISLAMIC') || str_contains($nomMatiere, 'ANG') || 
-                                      str_contains($nomMatiere, 'TAMAZIGHT') || str_contains($nomMatiere, 'ART') || 
-                                      str_contains($nomMatiere, 'INFO') || str_contains($nomMatiere, 'SPORT');
-                        
-                        $slotKeys = array_keys($slots); 
-                        
-                        usort($slotKeys, function($k1, $k2) use ($slots, $is1hStrict, $ostadId, $jour, $hasAdjacentClass, $isRelaxedMode) {
-                            $slotA = $slots[$k1]; $slotB = $slots[$k2];
-                            if ($is1hStrict && $slotA['duree'] != $slotB['duree']) return $slotA['duree'] <=> $slotB['duree']; 
-                            if (!$is1hStrict && $slotA['duree'] != $slotB['duree']) return $slotB['duree'] <=> $slotA['duree']; 
-                            if (!$isRelaxedMode) {
-                                $adjA = $hasAdjacentClass($ostadId, $jour, $slotA['debut'], $slotA['fin']) ? 1 : 0;
-                                $adjB = $hasAdjacentClass($ostadId, $jour, $slotB['debut'], $slotB['fin']) ? 1 : 0;
-                                if ($adjA != $adjB) return $adjB <=> $adjA;
-                            }
-                            return rand(-1, 1); 
-                        });
-
-                        foreach ($slotKeys as $k) {
-                            $slot = $slots[$k];
-                            if ($slot['filled'] || $slot['jour'] != $jour) continue;
-
-                            $localHeures = $getLocalHeures($ostadId, $jour);
-                            if ($localHeures >= 6) continue; 
-
-                            $maxPossible = min(2, $suiviMatiere[$mId]['reste'], $slot['duree'], (6 - $localHeures));
-                            if ($maxPossible <= 0) continue;
-
-                            $dureeA_Prendre = $maxPossible;
-                            if ($is1hStrict) $dureeA_Prendre = 1; 
-
-                            $heureFin = date('H:i', strtotime($slot['debut'] . " +{$dureeA_Prendre} hour"));
-                            if ($checkConflict($ostadId, $jour, $slot['debut'], $heureFin)) continue;
-
-                            if ($dureeA_Prendre < $slot['duree']) {
-                                $slots[] = ['jour' => $jour, 'debut' => $heureFin, 'fin' => $slot['fin'], 'duree' => ($slot['duree'] - $dureeA_Prendre), 'filled' => false];
-                            }
-
-                            $seancesToCreate[] = [
-                                'classe_id' => $classeId, 'enseignant_id' => $ostadId, 'matiere_id' => $mId,
-                                'jour' => $jour, 'heure_debut' => $slot['debut'], 'heure_fin' => $heureFin, 'duree' => $dureeA_Prendre
-                            ];
-                            
-                            $slots[$k]['filled'] = true;
-                            $suiviMatiere[$mId]['reste'] -= $dureeA_Prendre;
-                            $progress = true;
-                            break; 
-                        }
-                    }
-                }
-                if (!$progress) break;
-                $attempts++;
-            }
-
-            $sway3Baqin = collect($suiviMatiere)->sum('reste');
+            $nom = strtoupper($m->nom_matiere);
+            $vol = (int) $m->volume_horaire;
             
-            // If completely successful, save to DB
-            if ($sway3Baqin == 0) { 
-                foreach ($seancesToCreate as &$s) { 
-                    unset($s['duree']); 
-                    Seance::create($s); 
-                }
-                return ['success' => true];
-            }
+            $isAssasiya = str_contains($nom, 'ARAB') || str_contains($nom, 'FRAN') || str_contains($nom, 'MATH');
+            $mBlocks = [];
             
-            // Track the best attempt
-            if ($sway3Baqin < $minReste) { 
-                $minReste = $sway3Baqin; 
-                $bestSuiviMatiere = $suiviMatiere; 
+            if (str_contains($nom, 'ARAB') || str_contains($nom, 'FRAN')) {
+                if ($splitSubject && str_contains($nom, $splitSubject) && $vol >= 4) {
+                    $num2h = intval($vol / 2) - 1; 
+                    for ($i = 0; $i < $num2h; $i++) $mBlocks[] = 2;
+                    $mBlocks[] = 1; 
+                    $mBlocks[] = 1; 
+                    if ($vol % 2 !== 0) $mBlocks[] = 1; 
+                } else {
+                    for ($i = 0; $i < intval($vol / 2); $i++) $mBlocks[] = 2;
+                    if ($vol % 2 !== 0) $mBlocks[] = 1;
+                }
+            } elseif (str_contains($nom, 'MATH')) {
+                for ($i = 0; $i < intval($vol / 2); $i++) $mBlocks[] = 2;
+                if ($vol % 2 !== 0) $mBlocks[] = 1;
+                shuffle($mBlocks); 
+            } elseif (str_contains($nom, 'ISLAMIC') || str_contains($nom, 'ISLAM')) {
+                $mBlocks = [2, 1];
+            } elseif (str_contains($nom, 'ANG')) {
+                $mBlocks = [1, 1];
+                for ($i = 0; $i < $vol - 2; $i++) $mBlocks[] = 1;
+            } else {
+                while ($vol >= 2) { $mBlocks[] = 2; $vol -= 2; }
+                if ($vol == 1) $mBlocks[] = 1;
+            }
+
+            $mCount2h = 0;
+            $mCountMath = 0;
+
+            foreach ($mBlocks as $duree) {
+                $mandatory = null;
+                $forbid = [];
+                
+                if (str_contains($nom, 'ARAB') || str_contains($nom, 'FRAN')) {
+                    if ($duree == 2) {
+                        if ($mCount2h == 0) $mandatory = 'Lundi';
+                        elseif ($mCount2h == 1) $mandatory = 'Vendredi';
+                        $mCount2h++;
+                    } 
+                    elseif ($duree == 1) {
+                        $forbid = ['Lundi', 'Vendredi'];
+                    }
+                } 
+                elseif (str_contains($nom, 'MATH')) {
+                    if ($mCountMath == 0) $mandatory = 'Lundi';
+                    elseif ($mCountMath == 1) $mandatory = 'Vendredi';
+                    $mCountMath++;
+                }
+
+                $blocksToPlace[] = [
+                    'matiere_id' => $m->id,
+                    'prof_id'    => $prof->id,
+                    'duree'      => $duree,
+                    'isAssasiya' => $isAssasiya,
+                    'mandatory'  => $mandatory,
+                    'forbidden'  => $forbid,
+                    'nom'        => $nom
+                ];
             }
         }
 
-        // Fallback if bestSuiviMatiere is completely empty (Rare)
-        if (empty($bestSuiviMatiere)) {
-            return [
-                'success' => false, 
-                'message' => "❌ CONFLIT D'HORAIRE COMPLEXE :\nImpossible de trouver une combinaison valide pour cette classe, même avec assez d'heures. Modifiez manuellement ou libérez plus d'espace.",
-                'blocking_prof_id' => null
-            ];
+        $allSeancesDB = Seance::where('classe_id', '!=', $classeId)->get();
+        $profGrid = [];
+        $profDailyLoad = [];
+        $profTotalLoad = []; 
+
+        foreach ($allSeancesDB as $s) {
+            $eId = $s->enseignant_id;
+            $jour = $s->jour;
+            $hStart = (int) substr($s->heure_debut, 0, 2);
+            $duree = (int) substr($s->heure_fin, 0, 2) - $hStart;
+            $cId = $s->classe_id; 
+
+            for ($i = 0; $i < $duree; $i++) {
+                $profGrid[$eId][$jour][$hStart + $i] = $cId; 
+            }
+            $profDailyLoad[$eId][$jour] = ($profDailyLoad[$eId][$jour] ?? 0) + $duree;
+            $profTotalLoad[$eId] = ($profTotalLoad[$eId] ?? 0) + $duree;
         }
 
-        // IDENTIFY BLOCKING PROFESSOR FOR BULLDOZER
-        $blockingProfId = null;
-        $erreurs = [];
-        foreach ($bestSuiviMatiere as $mId => $data) {
-            if ($data['reste'] > 0) {
-                $prof = $data['assigned_prof'];
-                if ($prof && !$blockingProfId) {
-                    $blockingProfId = $prof->id; 
+        // 🔥 DAKA2 T-TARTIB: Khellet T-Tartib b z-zher 3la 7ssab L-Attempt bash my-w7elsh f nfs triq!
+        usort($blocksToPlace, function ($a, $b) use ($profTotalLoad, $attempt) {
+            $loadA = $profTotalLoad[$a['prof_id']] ?? 0;
+            $loadB = $profTotalLoad[$b['prof_id']] ?? 0;
+
+            if ($loadA >= 22 && $loadB < 22) return -1;
+            if ($loadB >= 22 && $loadA < 22) return 1;
+
+            if ($a['mandatory'] && !$b['mandatory']) return -1;
+            if (!$a['mandatory'] && $b['mandatory']) return 1;
+            
+            if ($loadA !== $loadB) return $loadB <=> $loadA; 
+            if ($a['duree'] !== $b['duree']) return $b['duree'] <=> $a['duree'];
+            
+            // Hna l-qaleb: khelet l-Mawad l-mtshabhin bash L-Code i-jreb triq jdida f kola attempt
+            return rand(-1, 1); 
+        });
+
+        $grid = [];
+        $classSubjectsDay = ['Lundi' => [], 'Mardi' => [], 'Mercredi' => [], 'Jeudi' => [], 'Vendredi' => []];
+        $classProfsDay    = ['Lundi' => [], 'Mardi' => [], 'Mercredi' => [], 'Jeudi' => [], 'Vendredi' => []];
+
+        if ($targetProfId) {
+            $existingClassSeances = Seance::where('classe_id', $classeId)
+                ->where('enseignant_id', '!=', $targetProfId)
+                ->get();
+
+            foreach ($existingClassSeances as $s) {
+                $jour = $s->jour;
+                $hStart = (int) substr($s->heure_debut, 0, 2);
+                $duree = (int) substr($s->heure_fin, 0, 2) - $hStart;
+                
+                for ($i = 0; $i < $duree; $i++) {
+                    $grid[$jour][$hStart + $i] = true; 
                 }
-                $erreurs[] = "📌 {$data['nom']} : Le professeur " . ($prof ? $prof->nom : 'Inconnu') . " n'a pas pu être placé à cause d'un conflit d'horaire complexe avec une autre classe.";
+                $classSubjectsDay[$jour][] = $s->matiere_id;
+                $classProfsDay[$jour][] = $s->enseignant_id;
             }
         }
         
-        return ['success' => false, 'message' => implode("\n", $erreurs), 'blocking_prof_id' => $blockingProfId];
+        $this->profFailCounts = [];
+        $this->conflictTracker = []; 
+        $this->iterations = 0;
+
+        if ($this->backtrackRec($blocksToPlace, 0, $grid, $profGrid, $profDailyLoad, $classSubjectsDay, $classProfsDay)) {
+            $seancesToInsert = [];
+            $now = now();
+            foreach (['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'] as $jour) {
+                if (!isset($grid[$jour])) continue;
+                $h = 9;
+                while ($h <= 18) {
+                    if (isset($grid[$jour][$h]) && is_array($grid[$jour][$h])) {
+                        $block = $grid[$jour][$h];
+                        $seancesToInsert[] = [
+                            'classe_id'     => $classeId,
+                            'enseignant_id' => $block['prof_id'],
+                            'matiere_id'    => $block['matiere_id'],
+                            'jour'          => $jour,
+                            'heure_debut'   => str_pad($h, 2, '0', STR_PAD_LEFT) . ':00:00',
+                            'heure_fin'     => str_pad($h + $block['duree'], 2, '0', STR_PAD_LEFT) . ':00:00',
+                            'created_at'    => $now,
+                            'updated_at'    => $now,
+                        ];
+                        $h += $block['duree'];
+                    } else {
+                        $h++;
+                    }
+                }
+            }
+            Seance::insert($seancesToInsert);
+            return ['success' => true];
+        }
+
+        $blockingProfId = null;
+        $conflictingClasses = [];
+        if (!empty($this->profFailCounts)) {
+            arsort($this->profFailCounts);
+            $blockingProfId = array_key_first($this->profFailCounts);
+            
+            if (isset($this->conflictTracker[$blockingProfId])) {
+                arsort($this->conflictTracker[$blockingProfId]);
+                $conflictingClasses = array_keys($this->conflictTracker[$blockingProfId]);
+            }
+        } else {
+            $blockingProfId = $blocksToPlace[0]['prof_id'] ?? null;
+        }
+
+        return [
+            'success' => false,
+            'blocking_prof_id' => $blockingProfId,
+            'conflicting_classes' => $conflictingClasses
+        ];
+    }
+
+    private function backtrackRec(array &$blocks, int $idx, array &$grid, array &$profGrid, array &$profDailyLoad, array &$classSubjectsDay, array &$classProfsDay): bool
+    {
+        if ($idx == count($blocks)) return true;
+
+        if (++$this->iterations > $this->maxIterations) {
+            $this->profFailCounts[$blocks[$idx]['prof_id']] = ($this->profFailCounts[$blocks[$idx]['prof_id']] ?? 0) + 100;
+            return false;
+        }
+
+        $block = $blocks[$idx];
+        $prof_id = $block['prof_id'];
+        $duree = $block['duree'];
+
+        $jours = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
+        if ($block['mandatory']) {
+            $jours = [$block['mandatory']];
+        } else {
+            // 🔥 FIX L-SOR3A (asort f blast usort): Hadi kat-sre3 L-Code 100 mra!
+            $loads = [];
+            foreach ($jours as $j) {
+                $loads[$j] = $profDailyLoad[$prof_id][$j] ?? 0;
+            }
+            asort($loads); // Rttb L-Ayam mn L-khawi l-L3amer b-sor3a
+            $jours = array_keys($loads);
+        }
+
+        $placed = false;
+
+        foreach ($jours as $jour) {
+            if (in_array($jour, $block['forbidden'])) continue;
+            
+            if (in_array($block['matiere_id'], $classSubjectsDay[$jour])) continue;
+            if (in_array($prof_id, $classProfsDay[$jour])) continue;
+
+            $profMax = $block['isAssasiya'] ? 6 : 7;
+            if ($jour == 'Mercredi') $profMax = min($profMax, 4);
+            if (($profDailyLoad[$prof_id][$jour] ?? 0) + $duree > $profMax) continue;
+
+            $heures = [];
+            if ($duree == 2) {
+                $heures = ($jour == 'Mercredi') ? [9, 11] : [9, 11, 16, 17];
+                shuffle($heures);
+            } else {
+                $heuresNormal = ($jour == 'Mercredi') ? [9, 10, 11, 12] : [9, 10, 11, 12, 18];
+                shuffle($heuresNormal);
+                $heuresPrio = ($jour == 'Mercredi') ? [] : [16, 17]; 
+                shuffle($heuresPrio);
+                $heures = array_merge($heuresPrio, $heuresNormal);
+            }
+
+            foreach ($heures as $h) {
+                $conflict = false;
+                for ($i = 0; $i < $duree; $i++) {
+                    if (isset($grid[$jour][$h + $i])) {
+                        $conflict = true; break;
+                    }
+                    if (isset($profGrid[$prof_id][$jour][$h + $i])) {
+                        $conflict = true; 
+                        $conflictingClassId = $profGrid[$prof_id][$jour][$h + $i];
+                        if (is_numeric($conflictingClassId)) {
+                            $this->conflictTracker[$prof_id][$conflictingClassId] = ($this->conflictTracker[$prof_id][$conflictingClassId] ?? 0) + 1;
+                        }
+                        break;
+                    }
+                }
+                if ($conflict) continue;
+
+                for ($i = 0; $i < $duree; $i++) {
+                    $grid[$jour][$h + $i] = $block;
+                    $profGrid[$prof_id][$jour][$h + $i] = true;
+                }
+                $profDailyLoad[$prof_id][$jour] = ($profDailyLoad[$prof_id][$jour] ?? 0) + $duree;
+                $classSubjectsDay[$jour][] = $block['matiere_id'];
+                $classProfsDay[$jour][] = $prof_id;
+
+                if ($this->backtrackRec($blocks, $idx + 1, $grid, $profGrid, $profDailyLoad, $classSubjectsDay, $classProfsDay)) {
+                    return true;
+                }
+
+                for ($i = 0; $i < $duree; $i++) {
+                    unset($grid[$jour][$h + $i]); 
+                    unset($profGrid[$prof_id][$jour][$h + $i]);
+                }
+                $profDailyLoad[$prof_id][$jour] -= $duree;
+                array_pop($classSubjectsDay[$jour]);
+                array_pop($classProfsDay[$jour]);
+            }
+        }
+
+        if (!$placed) {
+            $this->profFailCounts[$prof_id] = ($this->profFailCounts[$prof_id] ?? 0) + 1;
+        }
+
+        return false;
     }
 }

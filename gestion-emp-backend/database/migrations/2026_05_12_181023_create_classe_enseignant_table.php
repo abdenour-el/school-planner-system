@@ -11,14 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('matieres', function (Blueprint $table) {
+        // Create the pivot table linking teachers to specific classes
+        Schema::create('classe_enseignant', function (Blueprint $table) {
             $table->id();
-            $table->string('nom_matiere'); // e.g., Arabe, Math, Français
             
-            // Defines if the subject is (primary) or 'secondaire' (secondary)
-            $table->string('type')->default('secondaire'); 
+            // Foreign keys linking to teachers and classes
+            $table->foreignId('enseignant_id')->constrained('enseignants')->onDelete('cascade');
+            $table->foreignId('classe_id')->constrained('classes')->onDelete('cascade');
             
-            $table->integer('volume_horaire'); // Total hours required for this subject
             $table->timestamps();
         });
     }
@@ -28,6 +28,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('matieres');
+        Schema::dropIfExists('classe_enseignant');
     }
 };

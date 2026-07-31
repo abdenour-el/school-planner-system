@@ -9,16 +9,24 @@ class Matiere extends Model
 {
     use HasFactory;
 
-    // cette propriété indique à Laravel quels champs peuvent être remplis en masse (mass assignment)
-    protected $fillable = ['nom_matiere', 'volume_horaire'];
+    // Added 'type' (assasiya/secondaire) to the fillable array
+    protected $fillable = [
+        'nom_matiere', 
+        'type', 
+        'volume_horaire'
+    ];
 
-    // one module can be taught by many teachers (one-to-many relationship)
+    /**
+     * Relationship: A subject can be taught by many teachers.
+     */
     public function enseignants()
     {
         return $this->hasMany(Enseignant::class);
     }
 
-    // one module can have many seances (one-to-many relationship)
+    /**
+     * Relationship: A subject has many sessions.
+     */
     public function seances()
     {
         return $this->hasMany(Seance::class);
